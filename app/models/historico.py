@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import Column, String, ForeignKey
 from sqlalchemy.orm import relationship
-from app.db.postgres import Base
+from app.db.postgres.Base import Base
 
 # Model base p/ registrar os logs de operacoes que um cara fez na nossa plataforma
 class Historico(Base):

@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import Column, String, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
-from app.db.postgres import Base
+from app.db.postgres.Base import Base
 
 class Dispositivo(Base):
     # Criando tabela dispositivos passando a classe Base como parâmetro

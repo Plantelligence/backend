@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import Column, String, ForeignKey
 from sqlalchemy.orm import relationship
-from app.db.postgres import Base
+from app.db.postgres.Base import Base
 
 class Estufa(Base):
     # criando a tabela "estufas" no banco de dados PostgreSQL passando a classe Base como parametro
