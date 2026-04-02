@@ -60,20 +60,24 @@ ENFORCED_MFA_METHODS = ["email", "otp"]
 
 
 def _now_iso() -> str:
+    """Retorna data/hora atual em ISO 8601 UTC."""
     return datetime.now(UTC).isoformat()
 
 
 def _normalize_email(email: str) -> str:
+    """Padroniza e-mail para comparacoes e consultas."""
     return email.strip().lower()
 
 
 def _is_expired(expires_at: str | None) -> bool:
+    """Informa se um timestamp ISO ja expirou."""
     if not expires_at:
         return True
     return datetime.fromisoformat(expires_at) <= datetime.now(UTC)
 
 
 def map_user_document(user: User | None) -> dict | None:
+    """Converte modelo User para dicionario serializavel."""
     if not user:
         return None
     return user.to_dict()
@@ -99,6 +103,7 @@ def _sanitize_mfa(mfa: dict | None) -> dict | None:
 
 
 def sanitize_user(user: dict) -> dict:
+    """Monta payload seguro de usuario para resposta da API."""
     return {
         "id": user["id"],
         "email": user["email"],
@@ -119,29 +124,34 @@ def sanitize_user(user: dict) -> dict:
 
 
 def get_user_by_id(user_id: str) -> dict | None:
+    """Busca usuario por id no banco."""
     with get_session() as db:
         user = db.query(User).filter(User.id == user_id).first()
         return map_user_document(user)
 
 
 def find_user_by_email(email: str) -> dict | None:
+    """Busca usuario por e-mail no banco."""
     with get_session() as db:
         user = db.query(User).filter(User.email == email).first()
         return map_user_document(user)
 
 
 def _get_login_session(session_id: str) -> dict | None:
+    """Recupera uma sessao MFA temporaria pelo id."""
     with get_session() as db:
         session = db.query(LoginSession).filter(LoginSession.id == session_id).first()
         return session.to_dict() if session else None
 
 
 def _assert_active_login_session(session: dict | None) -> None:
+    """Valida se a sessao de login ainda esta ativa."""
     if not session or _is_expired(session.get("expiresAt")):
         raise PermissionError("Sessao de autenticacao MFA invalida ou expirada.")
 
 
 def _create_login_session(user_id: str, password_expired: bool) -> dict:
+    """Cria sessao temporaria para concluir MFA."""
     session_id = str(uuid4())
     expires_at = (datetime.now(UTC) + timedelta(seconds=LOGIN_SESSION_TTL_SECONDS)).isoformat()
 
@@ -157,6 +167,7 @@ def _create_login_session(user_id: str, password_expired: bool) -> dict:
 
 
 def _update_login_session(session_id: str, updates: dict[str, Any]) -> None:
+    """Atualiza campos pontuais da sessao MFA."""
     with get_session() as db:
         session = db.query(LoginSession).filter(LoginSession.id == session_id).first()
         if not session:
@@ -170,11 +181,13 @@ def _update_login_session(session_id: str, updates: dict[str, Any]) -> None:
 
 
 def _clear_login_session(session_id: str) -> None:
+    """Remove sessao MFA apos conclusao ou erro."""
     with get_session() as db:
         db.query(LoginSession).filter(LoginSession.id == session_id).delete(synchronize_session=False)
 
 
 def _create_otp_enrollment_for_user(user: dict) -> dict:
+    """Gera configuracao OTP inicial para um usuario."""
     with get_session() as db:
         db.query(OtpEnrollment).filter(OtpEnrollment.user_id == user["id"]).delete(synchronize_session=False)
 
@@ -204,6 +217,7 @@ def _create_otp_enrollment_for_user(user: dict) -> dict:
 
 
 def register_user(payload: dict) -> dict:
+    """Inicia cadastro criando desafio de confirmacao por e-mail."""
     normalized_email = _normalize_email(payload["email"])
     _validate_password(payload["password"])
     if find_user_by_email(normalized_email):
@@ -265,6 +279,7 @@ def register_user(payload: dict) -> dict:
 
 
 def confirm_registration_email(payload: dict) -> dict:
+    """Valida codigo de e-mail e libera etapa de configuracao OTP."""
     with get_session() as db:
         challenge = db.query(RegistrationChallenge).filter(RegistrationChallenge.id == payload["challengeId"]).first()
         challenge_dict = challenge.to_dict() if challenge else None
@@ -315,6 +330,7 @@ def confirm_registration_email(payload: dict) -> dict:
 
 
 def finalize_registration(payload: dict) -> dict:
+    """Conclui o cadastro criando usuario definitivo com MFA ativo."""
     with get_session() as db:
         challenge = db.query(RegistrationChallenge).filter(RegistrationChallenge.id == payload["otpSetupId"]).first()
         challenge_dict = challenge.to_dict() if challenge else None
@@ -385,6 +401,7 @@ def finalize_registration(payload: dict) -> dict:
 
 
 def login_user(payload: dict) -> dict:
+    """Valida credenciais e abre sessao temporaria para MFA."""
     normalized_email = _normalize_email(payload["email"])
     user = find_user_by_email(normalized_email)
     if not user:
@@ -422,6 +439,7 @@ def login_user(payload: dict) -> dict:
 
 
 def initiate_mfa_method(payload: dict) -> dict:
+    """Inicia o metodo MFA escolhido para a sessao atual."""
     session = _get_login_session(payload["sessionId"])
     _assert_active_login_session(session)
 
@@ -468,6 +486,7 @@ def initiate_mfa_method(payload: dict) -> dict:
 
 
 def complete_mfa(payload: dict) -> dict:
+    """Conclui MFA e emite tokens de acesso da sessao."""
     session = _get_login_session(payload["sessionId"])
     _assert_active_login_session(session)
 
@@ -568,6 +587,7 @@ def complete_mfa(payload: dict) -> dict:
 
 
 def refresh_session(payload: dict) -> dict:
+    """Renova sessao a partir de refresh token valido."""
     token_payload = verify_refresh_token(payload["refreshToken"])
     user = get_user_by_id(token_payload["sub"])
     if not user:
@@ -579,6 +599,7 @@ def refresh_session(payload: dict) -> dict:
 
 
 def revoke_session(payload: dict) -> None:
+    """Revoga refresh/access token para encerrar sessao."""
     refresh_token = payload.get("refreshToken")
     if refresh_token:
         revoke_refresh_token(refresh_token)
@@ -593,6 +614,7 @@ def revoke_session(payload: dict) -> None:
 
 
 def change_password(payload: dict) -> None:
+    """Altera senha exigindo verificacao MFA previa."""
     user = get_user_by_id(payload["userId"])
     if not user:
         raise FileNotFoundError("Usuario nao encontrado.")
@@ -634,6 +656,7 @@ def change_password(payload: dict) -> None:
 
 
 def start_user_otp_enrollment(payload: dict) -> dict:
+    """Inicia cadastro de autenticador OTP para o usuario."""
     user = get_user_by_id(payload["userId"])
     if not user:
         raise FileNotFoundError("Usuario nao encontrado.")
@@ -644,6 +667,7 @@ def start_user_otp_enrollment(payload: dict) -> dict:
 
 
 def complete_user_otp_enrollment(payload: dict) -> dict:
+    """Confirma OTP inicial e ativa autenticador no perfil."""
     user = get_user_by_id(payload["userId"])
     if not user:
         raise FileNotFoundError("Usuario nao encontrado.")
@@ -696,6 +720,7 @@ def complete_user_otp_enrollment(payload: dict) -> dict:
 
 
 def request_password_reset(payload: dict) -> dict:
+    """Gera token de recuperacao de senha para usuario existente."""
     normalized_email = _normalize_email(payload["email"])
     user = find_user_by_email(normalized_email)
 
@@ -727,6 +752,7 @@ def request_password_reset(payload: dict) -> dict:
 
 
 def reset_password(payload: dict) -> None:
+    """Aplica nova senha com token de recuperacao valido."""
     token_hash = hash_token(payload["token"])
     with get_session() as db:
         record = db.query(Token).filter(
@@ -763,6 +789,7 @@ def reset_password(payload: dict) -> None:
 
 
 def get_user_profile(user_id: str) -> dict:
+    """Retorna perfil sanitizado do usuario informado."""
     user = get_user_by_id(user_id)
     if not user:
         raise FileNotFoundError("Usuario nao encontrado.")
@@ -770,6 +797,7 @@ def get_user_profile(user_id: str) -> dict:
 
 
 def update_user_profile(payload: dict) -> dict:
+    """Atualiza dados de perfil e consentimento do usuario."""
     user = get_user_by_id(payload["userId"])
     if not user:
         raise FileNotFoundError("Usuario nao encontrado.")
@@ -789,12 +817,14 @@ def update_user_profile(payload: dict) -> dict:
 
 
 def list_users() -> list[dict]:
+    """Lista usuarios com dados seguros para resposta da API."""
     with get_session() as db:
         users = db.query(User).order_by(User.created_at.desc()).all()
         return [sanitize_user(u.to_dict()) for u in users]
 
 
 def update_user_role(payload: dict) -> dict:
+    """Atualiza o papel de um usuario sob autorizacao de admin."""
     actor = get_user_by_id(payload["actorUserId"])
     if not actor or actor.get("role") != "Admin":
         raise PermissionError("Apenas administradores podem alterar perfis de acesso.")
@@ -814,6 +844,7 @@ def update_user_role(payload: dict) -> dict:
 
 
 def request_data_deletion(payload: dict) -> None:
+    """Marca conta para processo de exclusao de dados."""
     with get_session() as db:
         u = db.query(User).filter(User.id == payload["userId"]).first()
         if u:

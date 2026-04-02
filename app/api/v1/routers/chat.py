@@ -7,13 +7,11 @@ router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 @router.post("/", response_model=ChatResponse)
 async def chat(
-    # Diferente dos outros arquivos, esse chat n precia de id ou coisa mt custom na db do usuario. 
-    # Sendo so o "request" com a lista do arr de messages dentro, ta otimo, mas mantemos o auth barrier tbm p ngm random fazer spam na gnt
     request: ChatRequest,
-    user: dict = Depends(get_current_user),  
+    user: dict = Depends(get_current_user),
 ):
-    # Await simples pro backend enviar o request assincrono ate o server do Llama Groq la fora
+    """Encaminha mensagens para o servico de IA e retorna a resposta."""
+    _ = user
     resposta = await chat_service.send_message(request.messages)
-    
-    # Empacota em um response basico dict object 
+
     return ChatResponse(response=resposta)

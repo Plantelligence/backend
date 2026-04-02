@@ -56,6 +56,7 @@ def is_password_expired(password_expires_at: str | None) -> bool:
 
 
 def _build_access_payload(user: dict[str, Any], jti: str) -> dict[str, Any]:
+    """Monta payload base do access token com claims de sessao."""
     return {
         "sub": user["id"],
         "email": user["email"],

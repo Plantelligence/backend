@@ -14,6 +14,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _raise_unauthorized(message: str = "Token invalido ou expirado.") -> None:
+    """Lanca resposta 401 padronizada para falhas de autenticacao."""
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=message)
 
 
@@ -49,6 +50,7 @@ def require_role(*allowed_roles: str):
     """Factory de dependencia para RBAC por papel."""
 
     def checker(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+        """Permite acesso apenas quando o papel do usuario esta na lista."""
         if user.get("role") not in allowed_roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso nao autorizado.")
         return user

@@ -20,6 +20,7 @@ from app.services.security_logger import log_security_event
 
 
 def _now_iso() -> str:
+    """Retorna horario atual em ISO UTC para persistencia."""
     return datetime.now(UTC).isoformat()
 
 
