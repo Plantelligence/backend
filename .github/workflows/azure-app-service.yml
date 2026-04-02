@@ -1,0 +1,95 @@
+name: Backend CI/CD — Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Cancela runs anteriores para evitar deploys concorrentes brigando pelo mesmo App Service
+concurrency:
+  group: azure-deploy
+  cancel-in-progress: true
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    name: Build and Deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Instala dependencias no runner Linux (mesma arch que Azure App Service)
+      # Usa --target para evitar venv com shebangs absolutos que quebram no Azure
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install --target=".python_packages/lib/site-packages" -r requirements.txt
+
+      # Empacota tudo — inclui .python_packages/ para fallback sem Oryx
+      - name: Create deployment zip
+        run: |
+          zip -r deploy.zip . \
+            --exclude "*.git*" \
+            --exclude "*.github*" \
+            --exclude "*__pycache__*" \
+            --exclude "*.pyc" \
+            --exclude ".env" \
+            --exclude "deploy.zip"
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Desabilita Oryx para usar os pacotes pre-instalados no CI
+      # Oryx fica como fallback (cria antenv/ se habilitado futuramente)
+      - name: Configure app settings
+        run: |
+          az webapp config appsettings set \
+            --resource-group rg-plantelligence \
+            --name planti-api \
+            --settings \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+              DISABLE_COLLECTSTATIC=true \
+              MFA_DEBUG_MODE=false \
+              SMTP_HOST=smtp.office365.com \
+              SMTP_PORT=587 \
+              SMTP_SECURE=false \
+              SMTP_USER=noreply@plantelligence.cloud \
+              "SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}" \
+              "SMTP_FROM=Plantelligence Security <noreply@plantelligence.cloud>"
+
+      - name: Remove unused settings
+        run: |
+          az webapp config appsettings delete \
+            --resource-group rg-plantelligence \
+            --name planti-api \
+            --setting-names PYTHONPATH ORYX_DISABLE_PIP_CACHE PIP_NO_CACHE_DIR 2>/dev/null || true
+
+      - name: Configure runtime and startup command
+        run: |
+          az webapp config set \
+            --resource-group rg-plantelligence \
+            --name planti-api \
+            --linux-fx-version "PYTHON|3.11" \
+            --startup-file "bash /home/site/wwwroot/startup.sh"
+
+      - name: Deploy zip to Azure App Service
+        run: |
+          az webapp deploy \
+            --resource-group rg-plantelligence \
+            --name planti-api \
+            --src-path deploy.zip \
+            --type zip \
+            --timeout 600
+
+      - name: Restart App Service
+        run: az webapp restart --resource-group rg-plantelligence --name planti-api
+
+      - name: Logout of Azure
+        if: always()
+        run: az logout

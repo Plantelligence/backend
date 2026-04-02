@@ -1,0 +1,25 @@
+# Environments
+venv/
+env/
+.venv/
+.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs / Editor
+.vscode/
+.idea/
+.spyderproject
+.ropeproject
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Credenciais e Segredos
+firebase-admin.json
+*.pem
+*.key
