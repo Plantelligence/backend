@@ -1,50 +1,29 @@
-"""Gerenciamento de sessoes do SQLAlchemy com inicializacao postergada do engine."""
-
 from __future__ import annotations
-
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
-from typing import Generator
 
-from sqlalchemy.orm import Session
+from app.config.settings import settings
 
-_engine = None
-_session_local = None
+# Engine que dita como nossa aplicacao conecta no Postgres do Azure.
+# A gente mandou um pool_pre_ping ai no meio pq qnd a database reseta no cloud 
+# a porta fecha mas o back as vezes tenta a antiga e crasha, isso contorna.
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    connect_args={"connect_timeout": 10},
+)
 
-
-def get_engine():
-    """Inicializa o engine do banco na primeira chamada e reutiliza nas seguintes."""
-    global _engine, _session_local
-    if _engine is None:
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from app.config.settings import settings
-
-        try:
-            _engine = create_engine(
-                settings.database_url,
-                pool_pre_ping=True,
-                pool_size=10,
-                max_overflow=20,
-                connect_args={"connect_timeout": 10},
-            )
-            _session_local = sessionmaker(
-                bind=_engine, autocommit=False, autoflush=False
-            )
-            print(f"[db] Engine criado: {settings.database_url[:40]}...")
-        except Exception as exc:
-            print(f"[db] ERRO ao criar engine: {exc}")
-            raise RuntimeError(f"Banco de dados indisponivel: {exc}") from exc
-
-    return _engine
-
+# Sessao base do SQLAlchemy p instanciar conexoes a partir dela...
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 @contextmanager
-def get_session() -> Generator[Session, None, None]:
-    """Abre uma sessao do banco, faz commit ao sair e rollback em caso de erro."""
-    if _session_local is None:
-        get_engine()
-
-    db: Session = _session_local()
+def get_session() -> Session:
+    # Usado as vezes qnd precisamos gerar sessao assincrona ou rodando 
+    # via CLI/background jobs, nao dependendo do FastAPI fazer o bind (db: Session)
+    db: Session = SessionLocal()
     try:
         yield db
         db.commit()
@@ -53,16 +32,3 @@ def get_session() -> Generator[Session, None, None]:
         raise
     finally:
         db.close()
-
-
-class _LazyEngine:
-    """Proxy para o engine do SQLAlchemy, inicializado sob demanda no primeiro acesso."""
-
-    def __getattr__(self, name: str):
-        return getattr(get_engine(), name)
-
-    def __repr__(self) -> str:
-        return repr(get_engine())
-
-
-engine = _LazyEngine()

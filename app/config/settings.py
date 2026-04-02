@@ -1,4 +1,8 @@
-"""Configuracoes da aplicacao carregadas a partir de variaveis de ambiente ou arquivo .env."""
+"""Configuracoes centrais do backend FastAPI.
+
+Segredos (JWT, SMTP e chaves de 2FA) devem vir de variaveis de ambiente
+via arquivo .env por seguranca e conformidade LGPD.
+"""
 
 from __future__ import annotations
 
@@ -41,6 +45,9 @@ class Settings(BaseSettings):
     influx_token: str | None = Field(default=None, alias="INFLUX_TOKEN")
     influx_org: str | None = Field(default=None, alias="INFLUX_ORG")
     influx_bucket: str = Field(default="plantelligence", alias="INFLUX_BUCKET")
+
+    # OpenWeatherMap (previsao do tempo)
+    openweathermap_api_key: str | None = Field(default=None, alias="OPENWEATHERMAP_API_KEY")
 
     smtp_host: str = Field(default="smtp.office365.com", alias="SMTP_HOST")
     smtp_port: int = Field(default=587, alias="SMTP_PORT")

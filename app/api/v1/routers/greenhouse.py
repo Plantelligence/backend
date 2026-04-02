@@ -1,227 +1,77 @@
-"""Rotas para cadastro e gerenciamento de estufas, avaliacao de metricas e alertas."""
-
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user
-from app.services.greenhouse_service import (
-    create_greenhouse,
-    delete_greenhouse,
-    evaluate_and_handle_greenhouse_metrics,
-    get_greenhouse_config_extended,
-    get_greenhouse_for_owner,
-    list_flower_profiles,
-    list_greenhouses,
-    update_alert_settings,
-    update_greenhouse_actuators,
-    update_greenhouse_basics,
-    update_greenhouse_parameters,
-    update_greenhouse_sensors,
-)
+from app.core.dependencies import get_current_user, get_db
+from app.schemas.estufa import CriarEstufa, AtualizarEstufa, EstufaResposta
+from app.services import estufa_service
 
-router = APIRouter(prefix="/api/greenhouse", tags=["greenhouse"])
+router = APIRouter(prefix="/api/estufas", tags=["Estufas"])
 
+@router.get("/", response_model=list[EstufaResposta])
+async def listar_estufas(
+    # Para validar no back a relacao do criador
+    # JWT = Token da conexao. db_session = Inversao de controle abrindo o banco e fechando no fim da rota
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Acessamos user["id"] porque o Depends do get_current_user ja decodificou as propriedades
+    return estufa_service.listar_estufas(db, user["id"])
 
-class CreateGreenhouseRequest(BaseModel):
-    name: str
-    flowerProfileId: str | None = None
-
-
-class UpdateGreenhouseRequest(BaseModel):
-    name: str
-    flowerProfileId: str
-
-
-class UpdateAlertSettingsRequest(BaseModel):
-    alertsEnabled: bool
-
-
-class EvaluateMetricsRequest(BaseModel):
-    metrics: dict = Field(default_factory=dict)
-    notify: bool = False
-    forceNotify: bool = False
-
-
-class UpdateSensorsRequest(BaseModel):
-    sensors: list = Field(default_factory=list)
-
-
-class UpdateActuatorsRequest(BaseModel):
-    actuators: list = Field(default_factory=list)
-
-
-class UpdateParametersRequest(BaseModel):
-    parameters: dict = Field(default_factory=dict)
-
-
-@router.get("/recommendations")
-async def recommendations(_: dict = Depends(get_current_user)) -> dict:
-    """Retorna perfis de cultivo com faixas ideais."""
-
-    return {"profiles": list_flower_profiles()}
-
-
-@router.get("/")
-async def list_owner_greenhouses(user: dict = Depends(get_current_user)) -> dict:
-    """Lista estufas do usuario autenticado."""
-
+# Reposta tem o padrao de http_201 por ser POST -> Criação de recurso novo no bd
+@router.post("/", response_model=EstufaResposta, status_code=status.HTTP_201_CREATED)
+async def criar_estufa(
+    payload: CriarEstufa,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
-        return {"greenhouses": list_greenhouses(user["id"])}
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-
-@router.post("/", status_code=status.HTTP_201_CREATED)
-async def create_owner_greenhouse(payload: CreateGreenhouseRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Cria estufa para usuario autenticado."""
-
-    try:
-        greenhouse = create_greenhouse(
-            {
-                "ownerId": user["id"],
-                "name": payload.name,
-                "flowerProfileId": payload.flowerProfileId,
-            }
-        )
-        greenhouses = list_greenhouses(user["id"])
-        return {"greenhouse": greenhouse, "greenhouses": greenhouses}
+        # A estufa service vai receber do token JWT que "Joao = Id tal", dessa forma, Joao 
+        # nao pode criar uma Estufa com o ID do Pedro, ja que nao e possivel falsificar JWT assinado
+        return estufa_service.criar_estufa(db, user["id"], payload)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-
-@router.get("/{greenhouse_id}")
-async def owner_greenhouse(greenhouse_id: str, user: dict = Depends(get_current_user)) -> dict:
-    """Retorna estufa especifica do owner."""
-
+@router.get("/{estufa_id}", response_model=EstufaResposta)
+async def buscar_estufa(
+    estufa_id: str,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
-        greenhouse = get_greenhouse_for_owner({"greenhouseId": greenhouse_id, "ownerId": user["id"]})
-        return {"greenhouse": greenhouse}
+        return estufa_service.buscar_estufa(db, estufa_id, user["id"])
+    except FileNotFoundError as exc:
+        # Pq retornar 404 e nao 500 generico? 404 facilita e avisa pro front que aquela pesquisa no search bar falhou vindo do back
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        # Caso o cara mande request no insomnia do id da estufa do amiguinho
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+@router.put("/{estufa_id}", response_model=EstufaResposta)
+async def atualizar_estufa(
+    estufa_id: str,
+    # O pydantic que vem daqui e o "AtualizarEstufa", ele e parcial entao todos os campos vao ser opcionais sem exceção
+    payload: AtualizarEstufa,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return estufa_service.atualizar_estufa(db, estufa_id, user["id"], payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-
-@router.put("/{greenhouse_id}")
-async def update_owner_greenhouse(greenhouse_id: str, payload: UpdateGreenhouseRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Atualiza nome e perfil de cultivo da estufa."""
-
-    try:
-        greenhouse = update_greenhouse_basics(
-            {
-                "greenhouseId": greenhouse_id,
-                "ownerId": user["id"],
-                "name": payload.name,
-                "flowerProfileId": payload.flowerProfileId,
-            }
-        )
-        return {"greenhouse": greenhouse}
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-
-@router.delete("/{greenhouse_id}")
-async def delete_owner_greenhouse(greenhouse_id: str, user: dict = Depends(get_current_user)) -> dict:
-    """Exclui estufa do usuario autenticado."""
-
+@router.delete("/{estufa_id}", status_code=status.HTTP_200_OK)
+async def deletar_estufa(
+    estufa_id: str,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
-        return delete_greenhouse({"greenhouseId": greenhouse_id, "ownerId": user["id"]})
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.patch("/{greenhouse_id}/alerts")
-async def patch_alerts(greenhouse_id: str, payload: UpdateAlertSettingsRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Atualiza flag de envio de alertas automaticos da estufa."""
-
-    try:
-        greenhouse = update_alert_settings(
-            {
-                "greenhouseId": greenhouse_id,
-                "ownerId": user["id"],
-                "alertsEnabled": payload.alertsEnabled,
-            }
-        )
-        return {"greenhouse": greenhouse}
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.post("/{greenhouse_id}/evaluate")
-async def evaluate_metrics(greenhouse_id: str, payload: EvaluateMetricsRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Avalia metricas, compara com perfil e notifica por e-mail quando preciso."""
-
-    try:
-        return evaluate_and_handle_greenhouse_metrics(
-            {
-                "greenhouseId": greenhouse_id,
-                "ownerId": user["id"],
-                "metrics": payload.metrics,
-                "notify": payload.notify,
-                "forceNotify": payload.forceNotify,
-            }
-        )
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.get("/{greenhouse_id}/config")
-async def get_config(greenhouse_id: str, user: dict = Depends(get_current_user)) -> dict:
-    """Retorna sensores, atuadores e parametros gerais da estufa."""
-
-    try:
-        return get_greenhouse_config_extended({"greenhouseId": greenhouse_id, "ownerId": user["id"]})
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        return estufa_service.deletar_estufa(db, estufa_id, user["id"])
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-
-@router.put("/{greenhouse_id}/sensors")
-async def update_sensors(greenhouse_id: str, payload: UpdateSensorsRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Atualiza lista de sensores da estufa."""
-
-    try:
-        return update_greenhouse_sensors({"greenhouseId": greenhouse_id, "ownerId": user["id"], "sensors": payload.sensors})
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.put("/{greenhouse_id}/actuators")
-async def update_actuators(greenhouse_id: str, payload: UpdateActuatorsRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Atualiza lista de atuadores da estufa."""
-
-    try:
-        return update_greenhouse_actuators({"greenhouseId": greenhouse_id, "ownerId": user["id"], "actuators": payload.actuators})
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.patch("/{greenhouse_id}/parameters")
-async def update_parameters(greenhouse_id: str, payload: UpdateParametersRequest, user: dict = Depends(get_current_user)) -> dict:
-    """Atualiza (merge) parametros gerais da estufa."""
-
-    try:
-        return update_greenhouse_parameters({"greenhouseId": greenhouse_id, "ownerId": user["id"], "parameters": payload.parameters})
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

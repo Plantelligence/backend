@@ -1,4 +1,5 @@
-"""Rotas de usuario autenticado e trilha de seguranca."""
+# Todos os endpoints que comecam com "/me" 
+# Rotas fechadas de update de dados sensiveis tipo trocar email e pegar logs propios.
 
 from __future__ import annotations
 
