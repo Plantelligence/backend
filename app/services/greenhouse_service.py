@@ -1,7 +1,10 @@
 """Servicos de regra de negocio para CRUD de estufas."""
 
 from sqlalchemy.orm import Session
+from app.db.postgres.session import get_session
 from app.models.estufa import Estufa
+from app.models.greenhouse import Greenhouse
+from app.models.user import User
 from app.schemas.estufa import CriarEstufa, AtualizarEstufa
 
 def _verificar_ownership(estufa: Estufa | None, user_id: str) -> None:
@@ -58,3 +61,62 @@ def deletar_estufa(db: Session, estufa_id: str, user_id: str) -> dict:
     db.delete(estufa)
     db.commit()
     return {"deletado_id": estufa_id}
+
+
+def list_greenhouses_for_admin(owner_id: str) -> list[dict]:
+    """Lista estufas do owner para uso no painel administrativo."""
+    with get_session() as db:
+        rows = (
+            db.query(Greenhouse)
+            .filter(Greenhouse.owner_id == owner_id)
+            .order_by(Greenhouse.created_at.desc())
+            .all()
+        )
+    return [row.to_dict() for row in rows]
+
+
+def get_greenhouse_for_admin(greenhouse_id: str) -> dict:
+    """Retorna uma estufa especifica por id para a visao admin."""
+    with get_session() as db:
+        row = db.query(Greenhouse).filter(Greenhouse.id == greenhouse_id).first()
+
+    if not row:
+        raise FileNotFoundError("Estufa nao encontrada.")
+
+    return row.to_dict()
+
+
+def update_greenhouse_team(payload: dict) -> dict:
+    """Atualiza a lista de watchers da estufa no contexto administrativo."""
+    greenhouse_id = payload.get("greenhouseId")
+    watcher_ids = payload.get("watcherIds") or []
+
+    if not greenhouse_id:
+        raise ValueError("greenhouseId e obrigatorio.")
+
+    # Remove duplicidades e valores vazios mantendo ordem de entrada.
+    cleaned_watcher_ids: list[str] = []
+    seen: set[str] = set()
+    for watcher_id in watcher_ids:
+        value = (watcher_id or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            cleaned_watcher_ids.append(value)
+
+    with get_session() as db:
+        greenhouse = db.query(Greenhouse).filter(Greenhouse.id == greenhouse_id).first()
+        if not greenhouse:
+            raise FileNotFoundError("Estufa nao encontrada.")
+
+        if cleaned_watcher_ids:
+            existing_users = (
+                db.query(User.id)
+                .filter(User.id.in_(cleaned_watcher_ids))
+                .all()
+            )
+            valid_ids = {row[0] for row in existing_users}
+            cleaned_watcher_ids = [wid for wid in cleaned_watcher_ids if wid in valid_ids]
+
+        greenhouse.watchers = cleaned_watcher_ids
+
+    return get_greenhouse_for_admin(greenhouse_id)

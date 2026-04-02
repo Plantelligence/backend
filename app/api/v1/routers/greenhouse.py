@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, get_db
 from app.schemas.estufa import CriarEstufa, AtualizarEstufa, EstufaResposta
-from app.services import estufa_service
+from app.services import greenhouse_service as estufa_service
 
 router = APIRouter(prefix="/api/estufas", tags=["Estufas"])
 
