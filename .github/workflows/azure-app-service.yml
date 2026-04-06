@@ -19,23 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Instala dependencias no runner Linux (mesma arch que Azure App Service)
-      # Usa --target para evitar venv com shebangs absolutos que quebram no Azure
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: |
-          pip install \
-            --platform manylinux_2_17_x86_64 \
-            --python-version 3.11 \
-            --implementation cp \
-            --only-binary=:all: \
-            --target=".python_packages/lib/site-packages" \
-            -r requirements.txt
-
-      # Empacota tudo — inclui .python_packages/ para fallback sem Oryx
       - name: Create deployment zip
         run: |
           zip -r deploy.zip . \
@@ -59,7 +42,7 @@ jobs:
             --resource-group rg-plantelligence \
             --name planti-api \
             --settings \
-              SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
               DISABLE_COLLECTSTATIC=true \
               MFA_DEBUG_MODE=false \
               SMTP_HOST=smtp.office365.com \
@@ -68,13 +51,6 @@ jobs:
               SMTP_USER=noreply@plantelligence.cloud \
               "SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}" \
               "SMTP_FROM=Plantelligence Security <noreply@plantelligence.cloud>"
-
-      - name: Remove unused settings
-        run: |
-          az webapp config appsettings delete \
-            --resource-group rg-plantelligence \
-            --name planti-api \
-            --setting-names PYTHONPATH ORYX_DISABLE_PIP_CACHE PIP_NO_CACHE_DIR 2>/dev/null || true
 
       - name: Configure runtime and startup command
         run: |
