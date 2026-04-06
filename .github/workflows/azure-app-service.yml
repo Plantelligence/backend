@@ -60,12 +60,6 @@ jobs:
             --linux-fx-version "PYTHON|3.11" \
             --startup-file "bash /home/site/wwwroot/startup.sh"
 
-      - name: Stop App Service before deploy
-        run: az webapp stop --resource-group rg-plantelligence --name planti-api
-
-      - name: Wait for App Service to stop
-        run: sleep 20
-
       - name: Deploy zip to Azure App Service
         run: |
           az webapp deploy \
