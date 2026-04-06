@@ -61,11 +61,6 @@ jobs:
             --linux-fx-version "PYTHON|3.11" \
             --startup-file "bash /home/site/wwwroot/startup.sh"
 
-      - name: Remove stale .python_packages from server
-        run: |
-          az webapp ssh --resource-group rg-plantelligence --name planti-api \
-            --command "rm -rf /home/site/wwwroot/.python_packages" 2>/dev/null || true
-
       - name: Deploy zip to Azure App Service
         run: |
           az webapp deploy \
@@ -73,10 +68,21 @@ jobs:
             --name planti-api \
             --src-path deploy.zip \
             --type zip \
-            --async true
+            --async true || true
 
-      - name: Restart App Service
-        run: az webapp restart --resource-group rg-plantelligence --name planti-api
+      - name: Wait for app to start
+        run: sleep 60
+
+      - name: Validate deployment
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://planti-api-aghhf0a7b3hdfpbr.brazilsouth-01.azurewebsites.net/health)
+          echo "Health check status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "App não respondeu com 200 após o deploy"
+            exit 1
+          fi
+          echo "Deploy validado com sucesso"
 
       - name: Logout of Azure
         if: always()
