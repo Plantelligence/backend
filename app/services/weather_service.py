@@ -1,9 +1,10 @@
-"""Servico de previsao do tempo para estufas com base na OpenWeatherMap API."""
+# previsão do tempo via OpenWeatherMap para as estufas
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 import httpx
 
@@ -13,12 +14,45 @@ from app.schemas.alertas_clima import Clima, ClimaTipo
 from app.schemas.clima_resposta import ClimaResposta
 
 
-# URL base da API de previsão do OpenWeatherMap (previsão de 5 dias, intervalo de 3h)
+# previsão de 5 dias em blocos de 3h
 _OWM_FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
+_OWM_CURRENT_URL = "https://api.openweathermap.org/data/2.5/weather"
+_FORECAST_CACHE_TTL_SECONDS = 10 * 60
+_CURRENT_CACHE_TTL_SECONDS = 5 * 60
+
+_forecast_cache: dict[str, tuple[datetime, dict]] = {}
+_current_cache: dict[str, tuple[datetime, dict]] = {}
+_cache_lock = Lock()
+
+
+def _cache_key(cidade: str, estado: str) -> str:
+    return f"{(cidade or '').strip().lower()}::{(estado or '').strip().upper()}"
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _cache_get(cache: dict[str, tuple[datetime, dict]], key: str) -> dict | None:
+    with _cache_lock:
+        item = cache.get(key)
+        if not item:
+            return None
+
+        expires_at, payload = item
+        if expires_at <= _now_utc():
+            cache.pop(key, None)
+            return None
+
+        return payload
+
+
+def _cache_set(cache: dict[str, tuple[datetime, dict]], key: str, payload: dict, ttl_seconds: int) -> None:
+    with _cache_lock:
+        cache[key] = (_now_utc() + timedelta(seconds=ttl_seconds), payload)
 
 
 async def _buscar_dados_api(cidade: str, estado: str) -> dict:
-    """Busca previsao bruta na API externa em celsius e idioma pt-BR."""
     if not settings.openweathermap_api_key:
         raise RuntimeError(
             "OPENWEATHERMAP_API_KEY nao configurada. "
@@ -32,14 +66,86 @@ async def _buscar_dados_api(cidade: str, estado: str) -> dict:
         "lang": "pt_br",
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(_OWM_FORECAST_URL, params=params, timeout=10.0)
-        response.raise_for_status()
-        return response.json()
+    key = _cache_key(cidade, estado)
+    cached = _cache_get(_forecast_cache, key)
+    if cached:
+        return cached
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(_OWM_FORECAST_URL, params=params, timeout=10.0)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise ValueError(f"Cidade/UF nao encontrada na OpenWeather: {cidade}/{estado}.") from exc
+        raise RuntimeError(f"Falha na OpenWeather (status {exc.response.status_code}).") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError("Falha de comunicacao com a OpenWeather.") from exc
+
+    _cache_set(_forecast_cache, key, payload, _FORECAST_CACHE_TTL_SECONDS)
+    return payload
+
+
+async def buscar_clima_externo_atual(cidade: str, estado: str) -> dict:
+    if not settings.openweathermap_api_key:
+        raise RuntimeError(
+            "OPENWEATHERMAP_API_KEY nao configurada. "
+            "Adicione a chave no seu arquivo .env."
+        )
+
+    normalized_city = (cidade or "").strip()
+    normalized_state = (estado or "").strip().upper()
+    if not normalized_city or len(normalized_state) != 2:
+        raise ValueError("Cidade/estado invalidos para consulta climatica externa.")
+
+    key = _cache_key(normalized_city, normalized_state)
+    cached = _cache_get(_current_cache, key)
+    if cached:
+        return cached
+
+    params = {
+        "q": f"{normalized_city},{normalized_state},BR",
+        "appid": settings.openweathermap_api_key,
+        "units": "metric",
+        "lang": "pt_br",
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(_OWM_CURRENT_URL, params=params, timeout=10.0)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise ValueError(f"Cidade/UF nao encontrada na OpenWeather: {normalized_city}/{normalized_state}.") from exc
+        raise RuntimeError(f"Falha na OpenWeather (status {exc.response.status_code}).") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError("Falha de comunicacao com a OpenWeather.") from exc
+
+    weather_info = (payload.get("weather") or [{}])[0]
+    main_data = payload.get("main") or {}
+    raw_temp = main_data.get("temp")
+    raw_humidity = main_data.get("humidity")
+
+    if raw_temp is None or raw_humidity is None:
+        raise RuntimeError("OpenWeather retornou dados incompletos de temperatura/umidade.")
+
+    current = {
+        "cidade": normalized_city,
+        "estado": normalized_state,
+        "temperatura": round(float(raw_temp), 1),
+        "umidade": int(raw_humidity),
+        "descricao": weather_info.get("description") or "sem descricao",
+        "condicao": weather_info.get("main") or "Desconhecida",
+        "atualizado_em": _now_utc(),
+    }
+
+    _cache_set(_current_cache, key, current, _CURRENT_CACHE_TTL_SECONDS)
+    return current
 
 
 def _agrupar_por_dia(data: dict) -> dict[str, list[dict]]:
-    """Agrupa as medicoes de 3h por data para montar o resumo diario."""
     dias: dict[str, list[dict]] = defaultdict(list)
     for entrada in data.get("list", []):
         data_str = entrada["dt_txt"].split(" ")[0]
@@ -48,7 +154,6 @@ def _agrupar_por_dia(data: dict) -> dict[str, list[dict]]:
 
 
 def _calcular_previsao_dia(data_str: str, medicoes: list[dict], estufa_id: str) -> PrevisaoDia:
-    """Calcula minimo/maximo diario a partir das medicoes da API."""
     temperaturas = [m["main"]["temp"] for m in medicoes]
     umidades = [m["main"]["humidity"] for m in medicoes]
     chances_chuva = [m.get("pop", 0) * 100 for m in medicoes]
@@ -68,7 +173,6 @@ def _calcular_previsao_dia(data_str: str, medicoes: list[dict], estufa_id: str) 
 
 
 def _gerar_alertas(previsoes: list[PrevisaoDia], estufa_id: str) -> list[Clima]:
-    """Converte previsoes diarias em alertas climaticos acionaveis."""
     alertas: list[Clima] = []
     agora = datetime.now(timezone.utc)
 
@@ -113,7 +217,6 @@ def _gerar_alertas(previsoes: list[PrevisaoDia], estufa_id: str) -> list[Clima]:
 
 
 async def buscar_clima_estufa(cidade: str, estado: str, estufa_id: str) -> ClimaResposta:
-    """Fluxo principal de previsao: coleta, agrega, avalia e retorna resposta final."""
     dados = await _buscar_dados_api(cidade, estado)
 
     dias = _agrupar_por_dia(dados)

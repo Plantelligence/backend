@@ -1,6 +1,5 @@
-"""Rotas de autenticacao, registro, MFA e gerenciamento de sessao."""
+# rotas de auth: registro, login, MFA e sessão
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -8,11 +7,13 @@ from pydantic import BaseModel, ConfigDict
 
 from app.core.rate_limit import limiter, login_limit
 from app.services.auth_service import (
+    complete_first_access,
     complete_mfa,
     confirm_registration_email,
     finalize_registration,
     initiate_mfa_method,
     login_user,
+    start_first_access,
     refresh_session,
     register_user,
     request_password_reset,
@@ -24,8 +25,6 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class FlexiblePayload(BaseModel):
-    """Payload flexivel para compatibilidade de contrato."""
-
     model_config = ConfigDict(extra="allow")
 
 
@@ -73,24 +72,31 @@ class PasswordResetConfirmRequest(BaseModel):
     newPassword: str
 
 
+class FirstAccessStartRequest(BaseModel):
+    token: str
+
+
+class FirstAccessCompleteRequest(BaseModel):
+    token: str
+    enrollmentId: str
+    newPassword: str
+    otpCode: str
+
+
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(payload: FlexiblePayload) -> Any:
-    """Inicia cadastro com desafio de verificacao por e-mail."""
-
+def register(payload: FlexiblePayload) -> Any:
     try:
-        return await asyncio.to_thread(register_user, payload.model_dump())
+        return register_user(payload.model_dump())
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/register/confirm")
-async def register_confirm(payload: ConfirmRegistrationRequest, request: Request) -> Any:
-    """Confirma codigo de e-mail e libera etapa OTP."""
-
+def register_confirm(payload: ConfirmRegistrationRequest, request: Request) -> Any:
     try:
         return confirm_registration_email(
             {
@@ -108,9 +114,7 @@ async def register_confirm(payload: ConfirmRegistrationRequest, request: Request
 
 
 @router.post("/register/otp")
-async def register_otp(payload: FinalizeRegistrationRequest, request: Request) -> dict[str, Any]:
-    """Finaliza cadastro apos validacao do app autenticador."""
-
+def register_otp(payload: FinalizeRegistrationRequest, request: Request) -> dict[str, Any]:
     try:
         user = finalize_registration(
             {
@@ -130,14 +134,12 @@ async def register_otp(payload: FinalizeRegistrationRequest, request: Request) -
 
 @router.post("/login")
 @limiter.limit(login_limit)
-async def login(payload: LoginRequest, request: Request) -> dict[str, Any]:
-    """Valida credenciais e inicia sessao MFA."""
-
+def login(payload: LoginRequest, request: Request) -> dict[str, Any]:
     try:
         result = login_user({**payload.model_dump(), "ipAddress": _client_ip(request)})
         if result.get("mfaRequired"):
             return result
-        # Login direto sem MFA (caso futuro): formata tokens igual ao mfa/verify
+        # caso futuro sem MFA: normaliza tokens no mesmo formato do mfa/verify
         tokens_raw = result.get("tokens") or {}
         access = tokens_raw.get("access") or {}
         refresh = tokens_raw.get("refresh") or {}
@@ -159,12 +161,10 @@ async def login(payload: LoginRequest, request: Request) -> dict[str, Any]:
 
 
 @router.post("/mfa/initiate")
-async def mfa_initiate(payload: InitiateMfaRequest, request: Request) -> Any:
-    """Inicia metodo de segundo fator (email ou app autenticador)."""
-
+def mfa_initiate(payload: InitiateMfaRequest, request: Request) -> Any:
     mfa_payload = {"sessionId": payload.sessionId, "method": payload.method, "ipAddress": _client_ip(request)}
     try:
-        return await asyncio.to_thread(initiate_mfa_method, mfa_payload)
+        return initiate_mfa_method(mfa_payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -174,9 +174,7 @@ async def mfa_initiate(payload: InitiateMfaRequest, request: Request) -> Any:
 
 
 @router.post("/mfa/verify")
-async def mfa_verify(payload: VerifyMfaRequest, request: Request) -> dict[str, Any]:
-    """Conclui MFA e devolve tokens no formato esperado pelo front."""
-
+def mfa_verify(payload: VerifyMfaRequest, request: Request) -> dict[str, Any]:
     try:
         result = complete_mfa(
             {
@@ -208,9 +206,7 @@ async def mfa_verify(payload: VerifyMfaRequest, request: Request) -> dict[str, A
 
 
 @router.post("/refresh")
-async def refresh(payload: RefreshRequest) -> dict[str, Any]:
-    """Renova sessao JWT via refresh token."""
-
+def refresh(payload: RefreshRequest) -> dict[str, Any]:
     try:
         result = refresh_session({"refreshToken": payload.refreshToken})
         return {
@@ -229,9 +225,7 @@ async def refresh(payload: RefreshRequest) -> dict[str, Any]:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(payload: LogoutRequest) -> Response:
-    """Encerra sessao com revogacao de refresh/access token."""
-
+def logout(payload: LogoutRequest) -> Response:
     try:
         revoke_session(payload.model_dump())
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -240,9 +234,8 @@ async def logout(payload: LogoutRequest) -> Response:
 
 
 @router.post("/password-reset/request")
-async def password_reset_request(payload: FlexiblePayload) -> dict[str, Any]:
-    """Solicita fluxo de reset de senha sem enumerar usuarios."""
-
+def password_reset_request(payload: FlexiblePayload) -> dict[str, Any]:
+    # resposta genérica para não vazar se o e-mail existe
     try:
         result = request_password_reset(payload.model_dump())
         return {
@@ -254,11 +247,42 @@ async def password_reset_request(payload: FlexiblePayload) -> dict[str, Any]:
 
 
 @router.post("/password-reset/confirm")
-async def password_reset_confirm(payload: PasswordResetConfirmRequest) -> dict[str, str]:
-    """Aplica nova senha a partir de token de recuperacao."""
-
+def password_reset_confirm(payload: PasswordResetConfirmRequest) -> dict[str, str]:
     try:
         reset_password({"token": payload.token, "newPassword": payload.newPassword})
         return {"message": "Senha redefinida com sucesso."}
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/first-access/start")
+def first_access_start(payload: FirstAccessStartRequest, request: Request) -> dict[str, Any]:
+    try:
+        return start_first_access({"token": payload.token, "ipAddress": _client_ip(request)})
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/first-access/complete")
+def first_access_complete(payload: FirstAccessCompleteRequest, request: Request) -> dict[str, str]:
+    try:
+        complete_first_access(
+            {
+                "token": payload.token,
+                "enrollmentId": payload.enrollmentId,
+                "newPassword": payload.newPassword,
+                "otpCode": payload.otpCode,
+                "ipAddress": _client_ip(request),
+            }
+        )
+        return {"message": "Primeiro acesso concluido com sucesso."}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

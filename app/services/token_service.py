@@ -1,4 +1,4 @@
-"""Servico de tokens JWT com persistencia em PostgreSQL."""
+# emissão, validação e revogação de tokens JWT
 
 from __future__ import annotations
 
@@ -20,13 +20,10 @@ from app.services.security_logger import log_security_event
 
 
 def _now_iso() -> str:
-    """Retorna horario atual em ISO UTC para persistencia."""
     return datetime.now(UTC).isoformat()
 
 
 def issue_session_tokens(user: dict) -> dict:
-    """Emite e persiste par access/refresh token."""
-
     access = create_access_token(user)
     refresh = create_refresh_token(user["id"])
 
@@ -47,8 +44,6 @@ def issue_session_tokens(user: dict) -> dict:
 
 
 def verify_access_token(token: str) -> dict:
-    """Valida access token e bloqueia jti revogado."""
-
     payload = decode_access_token(token)
     jti = payload.get("jti")
     if jti:
@@ -63,8 +58,6 @@ def verify_access_token(token: str) -> dict:
 
 
 def verify_refresh_token(token: str) -> dict:
-    """Valida refresh token e confere hash persistido."""
-
     payload = decode_refresh_token(token)
     with get_session() as db:
         record = db.query(Token).filter(
@@ -79,8 +72,6 @@ def verify_refresh_token(token: str) -> dict:
 
 
 def revoke_refresh_token(token: str) -> None:
-    """Revoga refresh token pelo hash."""
-
     with get_session() as db:
         record = db.query(Token).filter(
             Token.token_hash == hash_token(token),
@@ -92,8 +83,6 @@ def revoke_refresh_token(token: str) -> None:
 
 
 def revoke_access_token_by_jti(jti: str, user_id: str, expires_at: str) -> None:
-    """Registra revogacao de access token por jti."""
-
     with get_session() as db:
         db.add(Token(
             id=str(uuid4()),
@@ -106,8 +95,6 @@ def revoke_access_token_by_jti(jti: str, user_id: str, expires_at: str) -> None:
 
 
 def cleanup_expired_tokens() -> None:
-    """Limpa tokens e challenges expirados."""
-
     now = _now_iso()
     with get_session() as db:
         db.query(Token).filter(Token.expires_at <= now).delete(synchronize_session=False)

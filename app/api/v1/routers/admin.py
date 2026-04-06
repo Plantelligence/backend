@@ -1,128 +1,121 @@
-"""Rotas administrativas para usuarios, papeis e equipe de estufas."""
+# rotas de admin: usuários, papéis e bloqueio
+
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false
 
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from sqlalchemy import func
+from sqlalchemy import or_
 
 from app.core.dependencies import require_role
 from app.db.postgres.session import get_session
+from app.models.estufa import Estufa
 from app.models.user import User
-from app.services.auth_service import get_user_by_id, list_users, update_user_role
-from app.services.greenhouse_service import (
-    get_greenhouse_for_admin,
-    list_greenhouses_for_admin,
-    update_greenhouse_team,
+from app.services.auth_service import (
+    create_user_by_admin,
+    deactivate_organization_by_owner,
+    delete_user_by_admin,
+    get_user_by_id,
+    list_users,
+    resend_user_invitation,
+    set_user_access_status,
+    update_reader_greenhouse_access,
+    update_user_role,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+JsonDict = dict[str, Any]
 
 
 class UpdateRoleRequest(BaseModel):
     role: str
 
 
-class UpdateTeamRequest(BaseModel):
-    watcherIds: list[str]
+class CreateUserRequest(BaseModel):
+    fullName: str
+    email: str
+    role: str = "Collaborator"
+    readerGreenhouseIds: list[str] = []
 
 
-# Permissoes granulares alem do papel Admin/User.
-# O frontend envia o objeto completo e o backend persiste como JSON no campo users.permissions.
-class UpdatePermissionsRequest(BaseModel):
-    canViewTelemetry: bool = True
-    canViewAlerts: bool = True
-    canControlActuators: bool = False
-    canEditGreenhouseParameters: bool = False
-    canManageTeam: bool = False
+class UpdateAccessStatusRequest(BaseModel):
+    blocked: bool
+    reason: str | None = None
 
 
-def _resolve_greenhouse_for_admin_target(target_id: str) -> dict:
-    """Resolve estufa por id direto ou por ownerId para compatibilidade de contrato."""
-
-    try:
-        return get_greenhouse_for_admin(target_id)
-    except FileNotFoundError:
-        pass
-
-    greenhouses = list_greenhouses_for_admin(target_id)
-    if not greenhouses:
-        raise FileNotFoundError("Estufa nao encontrada.")
-    return greenhouses[0]
+class UpdateReaderAccessRequest(BaseModel):
+    greenhouseIds: list[str]
 
 
-@router.get("/secure-data")
-async def secure_data(_: dict = Depends(require_role("Admin"))) -> dict:
-    """Endpoint de diagnostico admin com metrica basica."""
+def _list_all_greenhouses(actor: JsonDict) -> list[JsonDict]:
+    actor_id = str(actor.get("id") or "").strip()
+    owner_id = str(actor.get("organizationOwnerId") or actor_id).strip()
+    org_key = str(actor.get("organizationKey") or "").strip()
 
     with get_session() as db:
-        total_users = db.query(func.count(User.id)).scalar() or 0
-    return {
-        "message": "Acesso concedido apenas a administradores.",
-        "metrics": {"totalUsers": total_users},
-    }
-
-
-@router.get("/smtp-test")
-async def smtp_test(_: dict = Depends(require_role("Admin"))) -> dict:
-    """Testa a conexao SMTP e retorna o resultado detalhado para diagnostico."""
-
-    import asyncio
-    from app.config.settings import settings
-
-    smtp_configured = bool(settings.smtp_user and settings.smtp_password)
-
-    if not smtp_configured:
-        return {
-            "ok": False,
-            "configured": False,
-            "error": "SMTP_USER ou SMTP_PASSWORD ausentes nas variaveis de ambiente.",
-            "smtp_user": settings.smtp_user or "(vazio)",
-            "smtp_host": settings.smtp_host,
-            "smtp_port": settings.smtp_port,
-        }
-
-    def _try_connect():
-        import smtplib
-        try:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(settings.smtp_user, settings.smtp_password)
-            return {"ok": True, "error": None}
-        except smtplib.SMTPAuthenticationError as exc:
-            return {"ok": False, "error": f"Autenticacao falhou: {exc.smtp_code} {exc.smtp_error}"}
-        except smtplib.SMTPConnectError as exc:
-            return {"ok": False, "error": f"Falha ao conectar: {exc}"}
-        except Exception as exc:
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-
-    result = await asyncio.to_thread(_try_connect)
-    return {
-        **result,
-        "configured": True,
-        "smtp_user": settings.smtp_user,
-        "smtp_host": settings.smtp_host,
-        "smtp_port": settings.smtp_port,
-    }
+        query = db.query(
+            Estufa.id,
+            Estufa.nome,
+            Estufa.cidade,
+            Estufa.estado,
+            Estufa.user_id,
+        ).join(User, User.id == Estufa.user_id)
+        if owner_id:
+            query = query.filter(or_(User.organization_owner_id == owner_id, User.id == actor_id))
+        elif org_key:
+            query = query.filter(User.organization_key == org_key)
+        else:
+            query = query.filter(Estufa.user_id == actor_id)
+        rows = query.order_by(Estufa.nome.asc()).all()
+        # colunas projetadas; sem instâncias ORM para não explodir fora da sessão
+        return [
+            {
+                "id": item[0],
+                "nome": item[1],
+                "cidade": item[2],
+                "estado": item[3],
+                "userId": item[4],
+            }
+            for item in rows
+        ]
 
 
 @router.get("/users")
-async def users(_: dict = Depends(require_role("Admin"))) -> dict:
-    """Lista usuarios com dados sanitizados para painel admin."""
-
+async def users(actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
     try:
-        return {"users": list_users()}
+        return {"users": list_users(actor["id"])}
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+async def create_user(payload: CreateUserRequest, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
+    try:
+        result = create_user_by_admin(
+            {
+                "actorUserId": actor["id"],
+                "fullName": payload.fullName,
+                "email": payload.email,
+                "role": payload.role,
+                "readerGreenhouseIds": payload.readerGreenhouseIds,
+            }
+        )
+        return result
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @router.put("/users/{user_id}/role")
-async def user_role(user_id: str, payload: UpdateRoleRequest, actor: dict = Depends(require_role("Admin"))) -> dict:
-    """Altera role de usuario (Admin/User)."""
-
+async def user_role(user_id: str, payload: UpdateRoleRequest, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
     try:
         user = update_user_role({"actorUserId": actor["id"], "targetUserId": user_id, "role": payload.role})
         return {"user": user}
@@ -135,42 +128,43 @@ async def user_role(user_id: str, payload: UpdateRoleRequest, actor: dict = Depe
 
 
 @router.get("/users/{user_id}/greenhouses")
-async def admin_user_greenhouses(user_id: str, _: dict = Depends(require_role("Admin"))) -> dict:
-    """Lista estufas de um usuario no contexto administrativo."""
-
+async def admin_user_greenhouses(user_id: str, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
+    # mantido por compatibilidade; devolve estufas delegadas ao leitor
     try:
-        return {"greenhouses": list_greenhouses_for_admin(user_id)}
+        user = get_user_by_id(user_id)
+        if not user:
+            raise FileNotFoundError("Usuario nao encontrado.")
+
+        allowed_ids = ((user.get("permissions") or {}).get("allowedGreenhouseIds") or [])
+        all_greenhouses = _list_all_greenhouses(actor)
+        delegated = [g for g in all_greenhouses if g["id"] in allowed_ids]
+        return {"greenhouses": delegated}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
-@router.get("/greenhouse/{target_id}")
-async def admin_greenhouse(target_id: str, _: dict = Depends(require_role("Admin"))) -> dict:
-    """Retorna config de estufa para painel admin (por greenhouseId ou userId)."""
-
+@router.get("/greenhouses")
+async def admin_greenhouses(actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
     try:
-        greenhouse = _resolve_greenhouse_for_admin_target(target_id)
-        return {"config": greenhouse, "greenhouse": greenhouse}
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return {"greenhouses": _list_all_greenhouses(actor)}
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
-@router.put("/greenhouse/{target_id}/team")
-async def admin_update_team(target_id: str, payload: UpdateTeamRequest, actor: dict = Depends(require_role("Admin"))) -> dict:
-    """Atualiza equipe de alertas por greenhouseId ou userId no contexto admin."""
-
+@router.put("/users/{user_id}/access-status")
+async def admin_update_access_status(user_id: str, payload: UpdateAccessStatusRequest, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
     try:
-        greenhouse_target = _resolve_greenhouse_for_admin_target(target_id)
-        greenhouse = update_greenhouse_team(
+        user = set_user_access_status(
             {
                 "actorUserId": actor["id"],
-                "greenhouseId": greenhouse_target["id"],
-                "watcherIds": payload.watcherIds,
+                "targetUserId": user_id,
+                "blocked": payload.blocked,
+                "reason": payload.reason,
             }
         )
-        return {"config": greenhouse, "greenhouse": greenhouse}
+        return {"user": user}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -179,51 +173,56 @@ async def admin_update_team(target_id: str, payload: UpdateTeamRequest, actor: d
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-# Permissoes granulares por usuario
-_DEFAULT_PERMISSIONS = {
-    "canViewTelemetry": True,
-    "canViewAlerts": True,
-    "canControlActuators": False,
-    "canEditGreenhouseParameters": False,
-    "canManageTeam": False,
-}
-
-
-@router.get("/users/{user_id}/permissions")
-async def get_user_permissions(user_id: str, _: dict = Depends(require_role("Admin"))) -> dict:
-    """Retorna permissoes granulares do usuario (merge com defaults)."""
-
+@router.put("/users/{user_id}/reader-greenhouses")
+async def admin_update_reader_greenhouses(user_id: str, payload: UpdateReaderAccessRequest, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
     try:
-        user = get_user_by_id(user_id)
-        if not user:
-            raise FileNotFoundError("Usuario nao encontrado.")
-        permissions = {**_DEFAULT_PERMISSIONS, **(user.get("permissions") or {})}
-        return {"permissions": permissions}
+        user = update_reader_greenhouse_access(
+            {
+                "actorUserId": actor["id"],
+                "targetUserId": user_id,
+                "allowedGreenhouseIds": payload.greenhouseIds,
+            }
+        )
+        return {"user": user}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.put("/users/{user_id}/permissions")
-async def update_user_permissions(user_id: str, payload: UpdatePermissionsRequest, _: dict = Depends(require_role("Admin"))) -> dict:
-    """Persiste permissoes granulares do usuario."""
-
+@router.post("/users/{user_id}/resend-invite")
+async def admin_resend_invite(user_id: str, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
     try:
-        user = get_user_by_id(user_id)
-        if not user:
-            raise FileNotFoundError("Usuario nao encontrado.")
-
-        new_permissions = payload.model_dump()
-        with get_session() as db:
-            u = db.query(User).filter(User.id == user_id).first()
-            if u:
-                u.permissions = new_permissions
-
-        updated = get_user_by_id(user_id)
-        permissions = {**_DEFAULT_PERMISSIONS, **(updated.get("permissions") or {})}
-        return {"permissions": permissions}
+        return resend_user_invitation({"actorUserId": actor["id"], "targetUserId": user_id})
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(user_id: str, actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
+    # dados da org são reatribuídos ao criador, não excluídos
+    try:
+        return delete_user_by_admin({"actorUserId": actor["id"], "targetUserId": user_id})
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/organization/deactivate")
+async def admin_deactivate_organization(actor: JsonDict = Depends(require_role("Admin"))) -> JsonDict:
+    # só o criador da org pode usar esta rota
+    try:
+        return deactivate_organization_by_owner({"actorUserId": actor["id"]})
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

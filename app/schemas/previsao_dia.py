@@ -1,8 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import date, datetime
 
-# Esse e o coracao da previsao do tempo filtrada e validada pelo pydantic
-# Aqui cada dia tem suas info primarias pra gnt n importar todo payload inutil da openWeatherMap
+# Modelo de previsao diaria usada pela API.
 class PrevisaoDia(BaseModel):
     data: date = Field(..., description="Data da previsao")
     temperatura_min: float = Field(..., description="Temperatura minima")
@@ -10,10 +9,10 @@ class PrevisaoDia(BaseModel):
     umidade_min: float = Field(..., description="Umidade minima")
     umidade_max: float = Field(..., description="Umidade maxima")
     
-    # Campo forcado de ge=0 (>= 0) le=100 (<=100) pra caso venha % zuada da API externa barrar erro la
+    # Percentual de chuva validado entre 0 e 100.
     chance_chuva: float = Field(..., ge=0, le=100, description="Chance de chuva em %")
     velocidade_vento: float = Field(..., description="Velocidade do vento em km/h")
     
-    # Referencia da estufa_id dona desse dia
+    # Identificador da estufa associada.
     estufa_id: str = Field(..., description="ID da estufa")
     gerado_em: datetime = Field(..., description="Data e hora da previsao")

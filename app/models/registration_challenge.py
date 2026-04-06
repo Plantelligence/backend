@@ -1,4 +1,4 @@
-"""Modelo SQLAlchemy para desafios de registro de usuario."""
+# modelo para desafios de registro (verificação de e-mail + OTP)
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ class RegistrationChallenge(Base):
     code_hash = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
+    organization_name = Column(String, nullable=True)
+    organization_key = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     city = Column(String, nullable=True)
     state = Column(String, nullable=True)
@@ -33,6 +35,8 @@ class RegistrationChallenge(Base):
             "codeHash": self.code_hash,
             "passwordHash": self.password_hash,
             "fullName": self.full_name,
+            "organizationName": self.organization_name,
+            "organizationKey": self.organization_key,
             "phone": self.phone,
             "city": self.city,
             "state": self.state,

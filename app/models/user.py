@@ -24,6 +24,17 @@ class User(Base):
     last_login_at = Column(String, nullable=True)
     last_password_change = Column(String, nullable=True)
     password_expires_at = Column(String, nullable=True)
+    blocked = Column(Boolean, nullable=False, default=False)
+    blocked_at = Column(String, nullable=True)
+    blocked_reason = Column(String, nullable=True)
+    organization_name = Column(String, nullable=True)
+    organization_key = Column(String, nullable=True, index=True)
+    organization_owner_id = Column(String, nullable=True, index=True)
+    created_by_user_id = Column(String, nullable=True, index=True)
+    invitation_sent_at = Column(String, nullable=True)
+    invitation_accepted_at = Column(String, nullable=True)
+    is_demo_account = Column(Boolean, nullable=False, default=False)
+    demo_expires_at = Column(String, nullable=True)
     deletion_requested = Column(Boolean, nullable=False, default=False)
     mfa_enabled = Column(Boolean, nullable=False, default=False)
     mfa_configured_at = Column(String, nullable=True)
@@ -32,6 +43,10 @@ class User(Base):
     # Exemplo: {"canControlActuators": true, "canEditGreenhouseParameters": false}
     permissions = Column(JSON, nullable=True)
 
+    # Compatibilidade com o modelo legado (tabelas em portugues).
+    estufas = relationship("Estufa", back_populates="user", cascade="all, delete-orphan")
+    historicos = relationship("Historico", back_populates="user", cascade="all, delete-orphan")
+    alertas = relationship("Alertas", back_populates="user", cascade="all, delete-orphan")
     greenhouses = relationship("Greenhouse", back_populates="owner", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict:
@@ -51,6 +66,17 @@ class User(Base):
             "lastLoginAt": self.last_login_at,
             "lastPasswordChange": self.last_password_change,
             "passwordExpiresAt": self.password_expires_at,
+            "blocked": bool(self.blocked),
+            "blockedAt": self.blocked_at,
+            "blockedReason": self.blocked_reason,
+            "organizationName": self.organization_name,
+            "organizationKey": self.organization_key,
+            "organizationOwnerId": self.organization_owner_id,
+            "createdByUserId": self.created_by_user_id,
+            "invitationSentAt": self.invitation_sent_at,
+            "invitationAcceptedAt": self.invitation_accepted_at,
+            "isDemoAccount": bool(self.is_demo_account),
+            "demoExpiresAt": self.demo_expires_at,
             "deletionRequested": bool(self.deletion_requested),
             "mfaEnabled": bool(self.mfa_enabled),
             "mfaConfiguredAt": self.mfa_configured_at,

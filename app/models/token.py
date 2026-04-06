@@ -1,4 +1,4 @@
-"""Modelo SQLAlchemy para tokens JWT (refresh, revogacao, reset de senha)."""
+"""Modelo SQLAlchemy para tokens JWT e fluxos especiais de acesso."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ class Token(Base):
     user_id = Column(String, nullable=False, index=True)
     token_hash = Column(String, nullable=True, index=True)
     jti = Column(String, nullable=True, index=True)
-    token_type = Column(String, nullable=False)  # refresh | access_revocation | password_reset
+    token_type = Column(String, nullable=False)  # refresh | access_revocation | password_reset | first_access
     expires_at = Column(String, nullable=False)
     revoked = Column(Boolean, nullable=False, default=False)
     revoked_at = Column(String, nullable=True)

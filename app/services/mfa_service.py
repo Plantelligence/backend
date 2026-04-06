@@ -1,4 +1,4 @@
-"""Gerenciamento de desafios MFA por e-mail, com controle de tentativas e expiração."""
+# desafios MFA por e-mail: geração, validação e controle de tentativas
 
 from __future__ import annotations
 
@@ -18,8 +18,6 @@ MAX_ATTEMPTS = 5
 
 
 def create_mfa_challenge(user: dict, metadata: dict | None = None) -> dict:
-    """Gera um novo codigo de verificacao por e-mail e persiste o desafio no banco."""
-
     if not user.get("id") or not user.get("email"):
         raise ValueError("Dados do usuario invalidos para MFA.")
 
@@ -68,8 +66,6 @@ def create_mfa_challenge(user: dict, metadata: dict | None = None) -> dict:
 
 
 def verify_mfa_challenge(challenge_id: str, code: str, ip_address: str | None = None) -> dict:
-    """Valida codigo de desafio MFA com bloqueio por tentativas."""
-
     with get_session() as db:
         challenge = db.query(MfaChallenge).filter(MfaChallenge.id == challenge_id).first()
         challenge_dict = challenge.to_dict() if challenge else None

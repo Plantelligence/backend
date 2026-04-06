@@ -3,6 +3,8 @@ venv/
 env/
 .venv/
 .env
+.env.*
+!.env.example
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -23,3 +25,9 @@ Thumbs.db
 firebase-admin.json
 *.pem
 *.key
+
+# Documentação interna (não subir para o GitHub)
+CONTEXTO-DEPLOY.local.md
+CONTEXTO-DEPLOY.md
+README_ENV_PROFILES.md
+README_FASTAPI_MIGRATION.md

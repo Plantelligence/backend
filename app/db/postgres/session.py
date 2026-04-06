@@ -4,10 +4,9 @@ from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 
 from app.config.settings import settings
+import app.models  # noqa: F401
 
-# Engine que dita como nossa aplicacao conecta no Postgres do Azure.
-# A gente mandou um pool_pre_ping ai no meio pq qnd a database reseta no cloud 
-# a porta fecha mas o back as vezes tenta a antiga e crasha, isso contorna.
+# pool_pre_ping descarta conexões quebradas antes de usar
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
@@ -16,13 +15,21 @@ engine = create_engine(
     connect_args={"connect_timeout": 10},
 )
 
-# Sessao base do SQLAlchemy p instanciar conexoes a partir dela...
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+# expire_on_commit=False evita DetachedInstanceError ao serializar objetos após commit
+SessionLocal = sessionmaker(
+    bind=engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
+
+
+def get_engine():
+    return engine
 
 @contextmanager
 def get_session() -> Session:
-    # Usado as vezes qnd precisamos gerar sessao assincrona ou rodando 
-    # via CLI/background jobs, nao dependendo do FastAPI fazer o bind (db: Session)
+    # sessão para uso fora do ciclo de dependência do FastAPI
     db: Session = SessionLocal()
     try:
         yield db
