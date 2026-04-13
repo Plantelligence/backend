@@ -147,13 +147,22 @@ async def otp_confirm(payload: ConfirmOtpEnrollmentRequest, request: Request, us
 
 @router.get("/logs")
 async def logs(limit: int = 500, user: dict = Depends(get_current_user)) -> dict:
-    # admin vê tudo; usuário comum só vê os próprios eventos
     try:
-        filter_user_id = None if user.get("role") == "Admin" else user["id"]
+        if user.get("role") == "Admin":
+            # admin vê apenas eventos da própria organização (tenant)
+            owner_id = user.get("organizationOwnerId") or user["id"]
+            return {
+                "logs": get_security_logs(
+                    limit,
+                    organization_owner_id=owner_id,
+                    allowed_actions=ADMIN_RELEVANT_ACTIONS,
+                )
+            }
+        # usuário comum só vê os próprios eventos
         return {
             "logs": get_security_logs(
                 limit,
-                user_id=filter_user_id,
+                user_id=user["id"],
                 allowed_actions=ADMIN_RELEVANT_ACTIONS,
             )
         }

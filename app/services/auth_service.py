@@ -434,7 +434,7 @@ def register_user(payload: dict) -> dict:
     return {
         "challengeId": challenge_id,
         "expiresAt": expires_at,
-        "debugCode": code if not smtp_success else None,
+        "debugCode": code if (not smtp_success and settings.mfa_debug_mode) else None,
     }
 
 
@@ -807,7 +807,9 @@ def change_password(payload: dict) -> None:
         verification_method = "otp"
 
     if not verification_method and challenge_id and challenge_code:
-        verify_mfa_challenge(challenge_id, challenge_code, payload.get("ipAddress"))
+        challenge_result = verify_mfa_challenge(challenge_id, challenge_code, payload.get("ipAddress"))
+        if challenge_result.get("userId") != payload["userId"]:
+            raise PermissionError("Desafio MFA nao pertence ao usuario.")
         verification_method = "email"
 
     if not verification_method:

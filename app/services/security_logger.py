@@ -7,6 +7,8 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import or_
+
 from app.db.postgres.session import get_session
 from app.models.estufa import Estufa
 from app.models.security_log import SecurityLog
@@ -73,6 +75,7 @@ def get_security_logs(
     limit: int = 100,
     user_id: str | None = None,
     allowed_actions: set[str] | None = None,
+    organization_owner_id: str | None = None,
 ) -> list[dict]:
     safe_limit = max(1, min(int(limit), 2000))
 
@@ -80,6 +83,14 @@ def get_security_logs(
         q = db.query(SecurityLog).order_by(SecurityLog.created_at.desc())
         if user_id:
             q = q.filter(SecurityLog.user_id == user_id)
+        elif organization_owner_id:
+            org_user_ids = [
+                row[0]
+                for row in db.query(User.id).filter(
+                    or_(User.organization_owner_id == organization_owner_id, User.id == organization_owner_id)
+                ).all()
+            ]
+            q = q.filter(SecurityLog.user_id.in_(org_user_ids))
         if allowed_actions:
             q = q.filter(SecurityLog.action.in_(list(allowed_actions)))
 

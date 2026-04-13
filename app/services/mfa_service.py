@@ -59,7 +59,7 @@ def create_mfa_challenge(user: dict, metadata: dict | None = None) -> dict:
         "expiresAt": expires_at,
     }
 
-    if not smtp_success:
+    if not smtp_success and settings.mfa_debug_mode:
         response["debugCode"] = code
 
     return response
