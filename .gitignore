@@ -31,3 +31,6 @@ CONTEXTO-DEPLOY.local.md
 CONTEXTO-DEPLOY.md
 README_ENV_PROFILES.md
 README_FASTAPI_MIGRATION.md
+
+# Testes (não subir para o GitHub)
+tests/
