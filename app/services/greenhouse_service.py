@@ -85,6 +85,7 @@ def _serialize_estufa_row(row: tuple, preset_map: dict[str, dict], user_map: dic
         "responsible_user_ids": watcher_ids,
         "alerts_enabled": bool(row[10]),
         "last_alert_at": row[11],
+        "alert_thresholds": row[12],
         "watchers_details": _resolve_watchers_details(watcher_ids, user_map),
         "preset": preset_map.get(preset_id) if preset_id else None,
     }
@@ -105,6 +106,7 @@ def _query_estufa_rows(db: Session, filter_clause) -> list[tuple]:
             Estufa.responsible_user_ids,
             Estufa.alerts_enabled,
             Estufa.last_alert_at,
+            Estufa.alert_thresholds,
         )
         .filter(filter_clause)
         .all()

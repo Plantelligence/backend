@@ -49,6 +49,24 @@ class Settings(BaseSettings):
     influx_org: str | None = Field(default=None, alias="INFLUX_ORG")
     influx_bucket: str = Field(default="plantelligence", alias="INFLUX_BUCKET")
 
+    # Azure IoT Hub (EventHub-compatible endpoint para consumo de telemetria)
+    iothub_connection_string: str | None = Field(default=None, alias="IOTHUB_CONNECTION_STRING")
+    iothub_eventhub_endpoint: str | None = Field(default=None, alias="IOTHUB_EVENTHUB_ENDPOINT")
+    iothub_eventhub_name: str | None = Field(default=None, alias="IOTHUB_EVENTHUB_NAME")
+    iothub_consumer_group: str = Field(default="$Default", alias="IOTHUB_CONSUMER_GROUP")
+
+    @property
+    def iothub_host(self) -> str | None:
+        """Extrai o hostname do IoT Hub a partir da connection string."""
+        cs = self.iothub_connection_string or ""
+        for part in cs.split(";"):
+            if part.startswith("HostName="):
+                return part[len("HostName="):]
+        return None
+
+    # API Key para dispositivos IoT enviarem telemetria diretamente via HTTP
+    telemetria_api_key: str | None = Field(default=None, alias="TELEMETRIA_API_KEY")
+
     # OpenWeatherMap (previsao do tempo)
     openweathermap_api_key: str | None = Field(default=None, alias="OPENWEATHERMAP_API_KEY")
 

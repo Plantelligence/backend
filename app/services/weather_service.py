@@ -131,6 +131,19 @@ async def buscar_clima_externo_atual(cidade: str, estado: str) -> dict:
     if raw_temp is None or raw_humidity is None:
         raise RuntimeError("OpenWeather retornou dados incompletos de temperatura/umidade.")
 
+    raw_clouds = (payload.get("clouds") or {}).get("all")
+    nuvens = int(raw_clouds) if raw_clouds is not None else None
+
+    # Estima lux com base na cobertura de nuvens e condição climática.
+    # Valores aproximados para céu aberto: 30000–100000 lux; nublado: 1000–10000 lux.
+    luminosidade_estimada: int | None = None
+    if nuvens is not None:
+        condicao = (weather_info.get("main") or "").lower()
+        if condicao in ("rain", "drizzle", "thunderstorm", "snow"):
+            luminosidade_estimada = max(200, round(500 * (1 - nuvens / 100)))
+        else:
+            luminosidade_estimada = round(50000 * (1 - nuvens / 100) + 1000)
+
     current = {
         "cidade": normalized_city,
         "estado": normalized_state,
@@ -138,6 +151,8 @@ async def buscar_clima_externo_atual(cidade: str, estado: str) -> dict:
         "umidade": int(raw_humidity),
         "descricao": weather_info.get("description") or "sem descricao",
         "condicao": weather_info.get("main") or "Desconhecida",
+        "nuvens": nuvens,
+        "luminosidade_estimada": luminosidade_estimada,
         "atualizado_em": _now_utc(),
     }
 

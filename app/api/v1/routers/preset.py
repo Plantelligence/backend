@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel as PydanticBaseModel
 from app.core.dependencies import get_current_user, get_db
 from app.schemas.preset import CriarPresetUsuario, AtualizarPresetUsuario, PresetResposta
 from app.services import preset_service
 
 router = APIRouter(prefix="/api/presets", tags=["Presets"])
+
+
+class SugestaoIAPayload(PydanticBaseModel):
+    descricao: str
 
 
 def _ensure_reader_read_only(user: dict) -> None:
@@ -74,3 +79,20 @@ async def buscar_preset(
     if not preset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preset nao encontrado.")
     return preset
+
+
+@router.post("/sugestao-ia")
+async def sugerir_preset_com_ia(
+    payload: SugestaoIAPayload,
+    user: dict = Depends(get_current_user),
+):
+    # Solicita sugestão de parâmetros de cultivo via IA e retorna JSON estruturado.
+    _ensure_reader_read_only(user)
+    try:
+        from app.services import chat_service
+        sugestao = await chat_service.suggest_custom_profile(payload.descricao)
+        return sugestao
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao gerar sugestão de perfil.") from exc

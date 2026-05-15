@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
+from typing import Optional
 
 class Faixas(BaseModel):
     min: float = Field(..., description="Minimo aceitavel para a faixa")
@@ -23,6 +24,7 @@ class CriarPreset(BaseModel):
     temperatura: FaixasMetricas = Field(..., description="Faixas de temperatura")
     umidade: FaixasMetricas = Field(..., description="Faixas de umidade")
     luminosidade: FaixasMetricas = Field(..., description="Faixas de luminosidade")
+    umidade_solo: Optional[FaixasMetricas] = Field(default=None, description="Faixas de umidade do solo/substrato")
 
 
 class AtualizarPreset(BaseModel):
@@ -34,6 +36,7 @@ class AtualizarPreset(BaseModel):
     temperatura: FaixasMetricas | None = Field(default=None, description="Faixas de temperatura")
     umidade: FaixasMetricas | None = Field(default=None, description="Faixas de umidade")
     luminosidade: FaixasMetricas | None = Field(default=None, description="Faixas de luminosidade")
+    umidade_solo: Optional[FaixasMetricas] = Field(default=None, description="Faixas de umidade do solo/substrato")
 
 
 class CriarPresetUsuario(BaseModel):
@@ -45,6 +48,7 @@ class CriarPresetUsuario(BaseModel):
     temperatura: FaixasMetricas = Field(..., description="Faixas de temperatura")
     umidade: FaixasMetricas = Field(..., description="Faixas de umidade")
     luminosidade: FaixasMetricas = Field(..., description="Faixas de luminosidade")
+    umidade_solo: Optional[FaixasMetricas] = Field(default=None, description="Faixas de umidade do solo/substrato")
 
 
 class AtualizarPresetUsuario(BaseModel):
@@ -56,6 +60,7 @@ class AtualizarPresetUsuario(BaseModel):
     temperatura: FaixasMetricas | None = Field(default=None, description="Faixas de temperatura")
     umidade: FaixasMetricas | None = Field(default=None, description="Faixas de umidade")
     luminosidade: FaixasMetricas | None = Field(default=None, description="Faixas de luminosidade")
+    umidade_solo: Optional[FaixasMetricas] = Field(default=None, description="Faixas de umidade do solo/substrato")
 
 
 class PresetResposta(BaseModel):
@@ -68,6 +73,7 @@ class PresetResposta(BaseModel):
     temperatura: FaixasMetricas = Field(..., description="Faixas de temperatura")
     umidade: FaixasMetricas = Field(..., description="Faixas de umidade")
     luminosidade: FaixasMetricas = Field(..., description="Faixas de luminosidade")
+    umidade_solo: Optional[FaixasMetricas] = Field(default=None, description="Faixas de umidade do solo/substrato")
     created_at: datetime = Field(..., description="Data e hora da criacao")
     updated_at: datetime = Field(..., description="Data e hora da atualizacao")
 

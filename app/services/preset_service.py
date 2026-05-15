@@ -38,6 +38,13 @@ presets_cogumelos: list[dict[str, Any]] = [
             "alerta_alto": {"min": 400, "max": 700},
             "critico_alto": {"min": 700, "max": 1500},
         },
+        "umidade_solo": {
+            "critico_baixo": {"min": 20, "max": 40},
+            "alerta_baixo": {"min": 40, "max": 55},
+            "ideal": {"min": 55, "max": 70},
+            "alerta_alto": {"min": 70, "max": 80},
+            "critico_alto": {"min": 80, "max": 100},
+        },
     },
     {
         "id": "shimeji",
@@ -66,6 +73,13 @@ presets_cogumelos: list[dict[str, Any]] = [
             "ideal": {"min": 180, "max": 500},
             "alerta_alto": {"min": 500, "max": 750},
             "critico_alto": {"min": 750, "max": 1500},
+        },
+        "umidade_solo": {
+            "critico_baixo": {"min": 20, "max": 42},
+            "alerta_baixo": {"min": 42, "max": 58},
+            "ideal": {"min": 58, "max": 72},
+            "alerta_alto": {"min": 72, "max": 82},
+            "critico_alto": {"min": 82, "max": 100},
         },
     },
     {
@@ -96,6 +110,13 @@ presets_cogumelos: list[dict[str, Any]] = [
             "alerta_alto": {"min": 350, "max": 600},
             "critico_alto": {"min": 600, "max": 1500},
         },
+        "umidade_solo": {
+            "critico_baixo": {"min": 20, "max": 42},
+            "alerta_baixo": {"min": 42, "max": 58},
+            "ideal": {"min": 58, "max": 72},
+            "alerta_alto": {"min": 72, "max": 82},
+            "critico_alto": {"min": 82, "max": 100},
+        },
     },
 ]
 def seed_presets(db: Session) -> None:
@@ -112,6 +133,7 @@ def seed_presets(db: Session) -> None:
             existente.temperatura = preset["temperatura"]
             existente.umidade = preset["umidade"]
             existente.luminosidade = preset["luminosidade"]
+            existente.umidade_solo = preset.get("umidade_solo")
 
         try:
             db.commit()
@@ -127,6 +149,7 @@ def seed_presets(db: Session) -> None:
                 existente.temperatura = preset["temperatura"]
                 existente.umidade = preset["umidade"]
                 existente.luminosidade = preset["luminosidade"]
+                existente.umidade_solo = preset.get("umidade_solo")
                 db.commit()
 
 def listar_presets(db: Session, user_id: str) -> list[Preset]:
@@ -182,6 +205,7 @@ def criar_preset_usuario(db: Session, user_id: str, dados: CriarPresetUsuario) -
         temperatura=dados.temperatura.model_dump(),
         umidade=dados.umidade.model_dump(),
         luminosidade=dados.luminosidade.model_dump(),
+        umidade_solo=dados.umidade_solo.model_dump() if dados.umidade_solo else None,
     )
     db.add(preset)
     db.commit()
@@ -222,6 +246,8 @@ def atualizar_preset_usuario(
         preset.umidade = updates["umidade"]
     if "luminosidade" in updates:
         preset.luminosidade = updates["luminosidade"]
+    if "umidade_solo" in updates:
+        preset.umidade_solo = updates["umidade_solo"]
 
     db.commit()
     db.refresh(preset)

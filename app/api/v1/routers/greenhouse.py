@@ -33,6 +33,14 @@ class EvaluateMetricsPayload(BaseModel):
     forceNotify: bool = False
 
 
+class UpdateAlertThresholdsPayload(BaseModel):
+    # Cada campo é dict {min, max} opcional. null = sem limiar configurado para esse parâmetro.
+    temperatura: dict | None = None
+    umidade: dict | None = None
+    umidade_solo: dict | None = None
+    luminosidade: dict | None = None
+
+
 def _to_range(metric: dict[str, Any] | None) -> dict[str, float] | None:
     if not isinstance(metric, dict):
         return None
@@ -336,14 +344,15 @@ async def avaliar_metricas_estufa(
     expected = {
         "temperature": _to_range(preset.get("temperatura")),
         "humidity": _to_range(preset.get("umidade")),
-        # soilMoisture = luminosidade por enquanto (legado de nomenclatura)
-        "soilMoisture": _to_range(preset.get("luminosidade")),
+        "soilMoisture": _to_range(preset.get("umidade_solo")),
+        "luminosity": _to_range(preset.get("luminosidade")),
     }
 
     metric_values = {
         "temperature": payload.metrics.get("temperature"),
         "humidity": payload.metrics.get("humidity"),
         "soilMoisture": payload.metrics.get("soilMoisture"),
+        "luminosity": payload.metrics.get("luminosity"),
     }
 
     allowed_sources = {"internal", "external"}
@@ -360,18 +369,21 @@ async def avaliar_metricas_estufa(
         "temperature": _resolve_source("temperature"),
         "humidity": _resolve_source("humidity"),
         "soilMoisture": _resolve_source("soilMoisture"),
+        "luminosity": _resolve_source("luminosity"),
     }
 
     metrics_evaluation = {
         "temperature": _evaluate_range(metric_values["temperature"], expected["temperature"]),
         "humidity": _evaluate_range(metric_values["humidity"], expected["humidity"]),
         "soilMoisture": _evaluate_range(metric_values["soilMoisture"], expected["soilMoisture"]),
+        "luminosity": _evaluate_range(metric_values["luminosity"], expected["luminosity"]),
     }
 
     metrics_coverage = {
         "temperature": bool(expected["temperature"] is not None and metric_values["temperature"] is not None),
         "humidity": bool(expected["humidity"] is not None and metric_values["humidity"] is not None),
         "soilMoisture": bool(expected["soilMoisture"] is not None and metric_values["soilMoisture"] is not None),
+        "luminosity": bool(expected["luminosity"] is not None and metric_values["luminosity"] is not None),
     }
     missing_metrics = [
         metric_name
@@ -392,7 +404,11 @@ async def avaliar_metricas_estufa(
         )
     if metrics_evaluation["soilMoisture"]["evaluated"] and not metrics_evaluation["soilMoisture"]["ok"] and expected["soilMoisture"]:
         alerts.append(
-            f"Luminosidade fora do ideal ({expected['soilMoisture']['min']} - {expected['soilMoisture']['max']} lux)."
+            f"Umidade do solo fora do ideal ({expected['soilMoisture']['min']}% - {expected['soilMoisture']['max']}%)."
+        )
+    if metrics_evaluation["luminosity"]["evaluated"] and not metrics_evaluation["luminosity"]["ok"] and expected["luminosity"]:
+        alerts.append(
+            f"Luminosidade fora do ideal ({expected['luminosity']['min']} - {expected['luminosity']['max']} lux)."
         )
 
     should_notify = bool(payload.notify) and len(alerts) > 0
@@ -457,3 +473,39 @@ async def avaliar_metricas_estufa(
         "responsibleCount": len(estufa.get("responsible_user_ids") or []),
         "greenhouse": estufa,
     }
+
+
+@router.patch("/{estufa_id}/alert-thresholds")
+async def atualizar_alert_thresholds(
+    estufa_id: str,
+    payload: UpdateAlertThresholdsPayload,
+    user: dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Salva limiares de alerta personalizados para a estufa.
+    if (user.get("role") or "").strip() == "Reader":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil Leitor possui acesso somente de consulta.")
+
+    estufa = db.query(estufa_service._Estufa_model()).filter_by(id=estufa_id).first() if False else None
+
+    # busca pelo ORM direto
+    from app.models.estufa import Estufa as EstufaModel
+    estufa = db.query(EstufaModel).filter(EstufaModel.id == estufa_id).first()
+    if not estufa:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estufa não encontrada.")
+    if not estufa_service._can_access_greenhouse_ids(estufa.id, estufa.user_id, user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para editar esta estufa.")
+
+    thresholds = {}
+    if payload.temperatura is not None:
+        thresholds["temperatura"] = payload.temperatura
+    if payload.umidade is not None:
+        thresholds["umidade"] = payload.umidade
+    if payload.substrato is not None:
+        thresholds["substrato"] = payload.substrato
+
+    estufa.alert_thresholds = thresholds if thresholds else None
+    db.commit()
+
+    atualizada = estufa_service.buscar_estufa(db, estufa_id, user)
+    return atualizada

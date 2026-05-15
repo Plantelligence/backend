@@ -24,6 +24,7 @@ class Preset(Base):
     temperatura = Column(JSON, nullable=False)
     umidade = Column(JSON, nullable=False)
     luminosidade = Column(JSON, nullable=False)
+    umidade_solo = Column(JSON, nullable=True)
     
     # Relacionamento reverso com estufas.
     estufas = relationship("Estufa", back_populates="preset")

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,4 +13,6 @@ class ClimaExternoResposta(BaseModel):
     umidade: int = Field(..., description="Umidade relativa do ar em porcentagem")
     descricao: str = Field(..., description="Descricao textual da condicao do clima")
     condicao: str = Field(..., description="Categoria geral da condicao climatica")
+    nuvens: Optional[int] = Field(default=None, description="Cobertura de nuvens em porcentagem (0-100)")
+    luminosidade_estimada: Optional[int] = Field(default=None, description="Luminosidade estimada em lux com base na cobertura de nuvens")
     atualizado_em: datetime = Field(..., description="Data/hora UTC da atualizacao")
