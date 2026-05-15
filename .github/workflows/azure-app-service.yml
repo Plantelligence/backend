@@ -51,7 +51,7 @@ jobs:
               SMTP_SECURE=false \
               SMTP_USER=noreply@plantelligence.cloud \
               "SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}" \
-              "SMTP_FROM=Plantelligence Security <noreply@plantelligence.cloud>"
+              "SMTP_FROM=No Reply | Plantelligence <noreply@plantelligence.cloud>"
 
       - name: Configure runtime and startup command
         run: |
