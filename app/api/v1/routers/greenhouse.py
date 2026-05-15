@@ -501,8 +501,10 @@ async def atualizar_alert_thresholds(
         thresholds["temperatura"] = payload.temperatura
     if payload.umidade is not None:
         thresholds["umidade"] = payload.umidade
-    if payload.substrato is not None:
-        thresholds["substrato"] = payload.substrato
+    if payload.umidade_solo is not None:
+        thresholds["umidade_solo"] = payload.umidade_solo
+    if payload.luminosidade is not None:
+        thresholds["luminosidade"] = payload.luminosidade
 
     estufa.alert_thresholds = thresholds if thresholds else None
     db.commit()

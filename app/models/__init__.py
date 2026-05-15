@@ -10,6 +10,7 @@ from app.models.mfa_challenge import MfaChallenge
 from app.models.otp_enrollment import OtpEnrollment
 from app.models.preset import Preset
 from app.models.registration_challenge import RegistrationChallenge
+from app.models.relatorio import Relatorio
 from app.models.security_log import SecurityLog
 from app.models.token import Token
 from app.models.user import User
@@ -25,6 +26,7 @@ __all__ = [
     "OtpEnrollment",
     "Preset",
     "RegistrationChallenge",
+    "Relatorio",
     "SecurityLog",
     "Token",
     "User",

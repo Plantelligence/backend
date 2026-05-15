@@ -45,6 +45,7 @@ jobs:
             --settings \
               SCM_DO_BUILD_DURING_DEPLOYMENT=true \
               DISABLE_COLLECTSTATIC=true \
+              RUN_STARTUP_MIGRATIONS=true \
               MFA_DEBUG_MODE=false \
               SMTP_HOST=smtp.office365.com \
               SMTP_PORT=587 \
