@@ -12,6 +12,28 @@ from app.schemas.relatorio import CriarRelatorio, RelatorioResposta
 router = APIRouter(prefix="/api/estufas", tags=["Relatórios"])
 
 
+@router.get("/{estufa_id}/diagnostico")
+async def diagnostico_estufa(
+    estufa_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.models.greenhouse import Greenhouse
+    estufa = db.query(Estufa).filter(Estufa.id == estufa_id).first()
+    greenhouse = db.query(Greenhouse).filter(Greenhouse.id == estufa_id).first()
+    total_estufas = db.query(Estufa).filter(Estufa.user_id == user.get("id")).count()
+    return {
+        "estufa_id": estufa_id,
+        "encontrado_em_estufas": estufa is not None,
+        "encontrado_em_greenhouses": greenhouse is not None,
+        "estufa_user_id": estufa.user_id if estufa else None,
+        "greenhouse_owner_id": greenhouse.owner_id if greenhouse else None,
+        "user_id_atual": user.get("id"),
+        "user_role": user.get("role"),
+        "total_estufas_deste_usuario": total_estufas,
+    }
+
+
 def _verificar_acesso_estufa(db: Session, estufa_id: str, user: dict) -> None:
     # verifica existência e acesso à estufa antes de operar nos relatórios
     # verifica na tabela estufas primeiro; se não encontrar, tenta a tabela greenhouses
