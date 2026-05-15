@@ -6,7 +6,6 @@ on:
       - main
   workflow_dispatch:
 
-# Cancela runs anteriores para evitar deploys concorrentes brigando pelo mesmo App Service
 concurrency:
   group: azure-deploy
   cancel-in-progress: true
@@ -30,46 +29,12 @@ jobs:
             --exclude "deploy.zip" \
             --exclude ".python_packages/*"
 
-      - name: Login to Azure
-        uses: azure/login@v2
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      # Desabilita Oryx para usar os pacotes pre-instalados no CI
-      # Oryx fica como fallback (cria antenv/ se habilitado futuramente)
-      - name: Configure app settings
-        run: |
-          az webapp config appsettings set \
-            --resource-group rg-plantelligence \
-            --name planti-api \
-            --settings \
-              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-              DISABLE_COLLECTSTATIC=true \
-              RUN_STARTUP_MIGRATIONS=true \
-              MFA_DEBUG_MODE=false \
-              SMTP_HOST=smtp.office365.com \
-              SMTP_PORT=587 \
-              SMTP_SECURE=false \
-              SMTP_USER=noreply@plantelligence.cloud \
-              "SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}" \
-              "SMTP_FROM=No Reply | Plantelligence <noreply@plantelligence.cloud>"
-
-      - name: Configure runtime and startup command
-        run: |
-          az webapp config set \
-            --resource-group rg-plantelligence \
-            --name planti-api \
-            --linux-fx-version "PYTHON|3.11" \
-            --startup-file "bash /home/site/wwwroot/startup.sh"
-
-      - name: Deploy zip to Azure App Service
-        run: |
-          az webapp deploy \
-            --resource-group rg-plantelligence \
-            --name planti-api \
-            --src-path deploy.zip \
-            --type zip \
-            --async true || true
+          app-name: planti-api
+          publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+          package: deploy.zip
 
       - name: Wait for app to start
         run: sleep 60
@@ -84,7 +49,3 @@ jobs:
             exit 1
           fi
           echo "Deploy validado com sucesso"
-
-      - name: Logout of Azure
-        if: always()
-        run: az logout
