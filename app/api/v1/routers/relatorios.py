@@ -12,15 +12,27 @@ from app.schemas.relatorio import CriarRelatorio, RelatorioResposta
 router = APIRouter(prefix="/api/estufas", tags=["Relatórios"])
 
 
-def _verificar_acesso_estufa(db: Session, estufa_id: str, user: dict) -> Estufa:
+def _verificar_acesso_estufa(db: Session, estufa_id: str, user: dict) -> None:
     # verifica existência e acesso à estufa antes de operar nos relatórios
+    # verifica na tabela estufas primeiro; se não encontrar, tenta a tabela greenhouses
     from app.services import greenhouse_service as svc
+    from app.models.greenhouse import Greenhouse
+
     estufa = db.query(Estufa).filter(Estufa.id == estufa_id).first()
-    if not estufa:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estufa não encontrada.")
-    if not svc._can_access_greenhouse_ids(estufa.id, estufa.user_id, user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para acessar esta estufa.")
-    return estufa
+    if estufa:
+        if not svc._can_access_greenhouse_ids(estufa.id, estufa.user_id, user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para acessar esta estufa.")
+        return
+
+    greenhouse = db.query(Greenhouse).filter(Greenhouse.id == estufa_id).first()
+    if greenhouse:
+        if not svc._can_access_greenhouse_ids(greenhouse.id, greenhouse.owner_id, user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para acessar esta estufa.")
+        print(f"[relatorios] acesso via greenhouses id={estufa_id!r}", flush=True)
+        return
+
+    print(f"[relatorios] 404 estufa_id={estufa_id!r} user={user.get('id')!r}", flush=True)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estufa não encontrada.")
 
 
 @router.get("/{estufa_id}/relatorios/resumo")

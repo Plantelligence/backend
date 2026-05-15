@@ -156,6 +156,9 @@ async def _migrate_schema(real_engine) -> None:
         "ALTER TABLE dispositivos ADD COLUMN IF NOT EXISTS iothub_device_id VARCHAR",
         "ALTER TABLE dispositivos ADD COLUMN IF NOT EXISTS iothub_primary_key VARCHAR",
         "ALTER TABLE dispositivos ADD COLUMN IF NOT EXISTS iothub_sas_token VARCHAR",
+        # remove FK de relatorios.estufa_id para permitir relatórios em estufas de ambas as tabelas
+        # usa DO block para encontrar o constraint pelo nome dinâmico (gerado por SQLAlchemy ou pelo SQL raw)
+        "DO $$ DECLARE c TEXT; BEGIN SELECT conname INTO c FROM pg_constraint JOIN pg_class ON pg_constraint.conrelid = pg_class.oid WHERE pg_class.relname = 'relatorios' AND pg_constraint.contype = 'f' AND conname LIKE '%estufa_id%' LIMIT 1; IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE relatorios DROP CONSTRAINT ' || quote_ident(c); END IF; END $$",
     ]
 
     def _run() -> None:
