@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey
+from sqlalchemy import Column, String, ForeignKey, Boolean, Integer
 from sqlalchemy.orm import relationship
 from app.db.postgres.Base import Base
 
@@ -28,5 +28,11 @@ class Relatorio(Base):
     # Metadados de criação.
     criado_em = Column(String, nullable=False)
     criado_por_id = Column(String, nullable=True)
+
+    # Indicador de geracao automatica pelo sistema.
+    auto_generated = Column(Boolean, nullable=False, default=False)
+
+    # Contagem de alertas ocorridos no periodo.
+    alert_count = Column(Integer, nullable=False, default=0)
 
     estufa = relationship("Estufa", back_populates="relatorios")

@@ -199,6 +199,73 @@ class InfluxDB:
                     result[field] = round(float(value), 2)
         return result
 
+    async def query_sensor_stats(
+        self,
+        estufa_id: str,
+        inicio: str,
+        fim: str,
+    ) -> dict:
+        """
+        Retorna estatisticas completas (min, max, mean, count) dos sensores
+        para um periodo de tempo.
+
+        Usado para geracao automatica de relatorios.
+        As datas devem estar no formato YYYY-MM-DD.
+        Retorna um dicionario no formato:
+          {
+            "temperatura": {"min": 18.0, "max": 28.0, "mean": 22.5, "count": 144},
+            "umidade": {...},
+            ...
+          }
+        """
+        if not _DATE_RE.match(inicio) or not _DATE_RE.match(fim):
+            raise ValueError("Formato de data invalido. Use YYYY-MM-DD.")
+
+        safe_id = estufa_id.replace('"', "").replace("\\", "")
+
+        query = (
+            f'from(bucket: "{settings.influx_bucket}")\n'
+            f'  |> range(start: {inicio}T00:00:00Z, stop: {fim}T23:59:59Z)\n'
+            f'  |> filter(fn: (r) => r._measurement == "{_MEASUREMENT}")\n'
+            f'  |> filter(fn: (r) => r.estufa_id == "{safe_id}")\n'
+            '  |> filter(fn: (r) => r._field == "temperatura" or r._field == "umidade" '
+            'or r._field == "umidade_solo" or r._field == "luminosidade")\n'
+            '  |> group(columns: ["_field"])\n'
+            '  |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)\n'
+            '  |> group(columns: ["_field"])\n'
+            '[min: last(), max: last(), mean: last(), count: last()]\n'
+        )
+
+        # Fallback: usar queries separadas para cada agregacao
+        result: dict = {}
+        fields = ["temperatura", "umidade", "umidade_solo", "luminosidade"]
+        aggregations = ["min", "max", "mean", "count"]
+
+        for field in fields:
+            field_result: dict = {}
+            for agg in aggregations:
+                agg_query = (
+                    f'from(bucket: "{settings.influx_bucket}")\n'
+                    f'  |> range(start: {inicio}T00:00:00Z, stop: {fim}T23:59:59Z)\n'
+                    f'  |> filter(fn: (r) => r._measurement == "{_MEASUREMENT}")\n'
+                    f'  |> filter(fn: (r) => r.estufa_id == "{safe_id}")\n'
+                    f'  |> filter(fn: (r) => r._field == "{field}")\n'
+                    f'  |> {agg}()'
+                )
+                try:
+                    tables = await self.query(agg_query)
+                    for table in tables:
+                        for record in table.records:
+                            val = record.get_value()
+                            if val is not None:
+                                field_result[agg] = round(float(val), 2) if agg != "count" else int(val)
+                except Exception:
+                    pass
+            if field_result:
+                result[field] = field_result
+
+        return result
+
     async def query(self, query: str):
         """Executa uma query Flux genérica e retorna os resultados em tabelas."""
         await self._ensure_connected()

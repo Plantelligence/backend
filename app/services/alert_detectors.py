@@ -704,27 +704,71 @@ async def _run_report_generator() -> None:
 
 
 async def _generate_weekly_reports() -> None:
-    """Gera relatorios semanais para todas as estufas."""
+    """Gera relatorios semanais reais para todas as estufas com dados do InfluxDB."""
     from app.services.notification_engine import get_notification_engine
+    from app.db.influx.influx import influx_db
+    from app.models.relatorio import Relatorio
 
     engine = get_notification_engine()
+    now = datetime.now(timezone.utc)
+
+    # calcular periodo da semana anterior (segunda a domingo)
+    days_since_monday = now.weekday()
+    last_monday = now.date() - timedelta(days=days_since_monday + 7)
+    last_sunday = last_monday + timedelta(days=6)
+    periodo_inicio = last_monday.isoformat()
+    periodo_fim = last_sunday.isoformat()
 
     with get_session() as db:
         estufas = db.query(Estufa).all()
 
     for estufa in estufas:
         try:
+            # buscar medias do InfluxDB
+            averages = await influx_db.query_sensor_averages(
+                estufa_id=estufa.id,
+                inicio=periodo_inicio,
+                fim=periodo_fim,
+            )
+
+            # criar relatorio no banco
+            def _fmt(val) -> str | None:
+                return str(val) if val is not None else None
+
+            novo = Relatorio(
+                estufa_id=estufa.id,
+                periodo_inicio=periodo_inicio,
+                periodo_fim=periodo_fim,
+                avg_temperatura=_fmt(averages.get("temperatura")),
+                avg_umidade=_fmt(averages.get("umidade")),
+                avg_umidade_solo=_fmt(averages.get("umidade_solo")),
+                avg_luminosidade=_fmt(averages.get("luminosidade")),
+                resumo=None,
+                criado_em=now.isoformat(),
+                criado_por_id=None,  # sistema
+                auto_generated=True,
+                alert_count=0,
+            )
+            db.add(novo)
+            db.commit()
+
+            # despachar notificacao
             engine.dispatch(
                 user_id=estufa.user_id,
                 notification_type="weekly_report",
                 severity="info",
                 title=f"Relatorio semanal — {estufa.nome}",
                 message=(
-                    f"O relatorio semanal da estufa '{estufa.nome}' esta disponivel. "
-                    f"Consulte o dashboard para ver as medias e alertas da semana."
+                    f"O relatorio semanal da estufa '{estufa.nome}' ({periodo_inicio} a {periodo_fim}) "
+                    f"foi gerado automaticamente. Consulte o dashboard para ver as medias da semana."
                 ),
                 greenhouse_id=estufa.id,
-                metadata={"reportPeriod": "weekly"},
+                metadata={
+                    "reportPeriod": "weekly",
+                    "periodoInicio": periodo_inicio,
+                    "periodoFim": periodo_fim,
+                    "relatorioId": novo.id,
+                },
             )
         except Exception as exc:
             logger.warning("weekly_report_error estufa_id=%s: %s", estufa.id, exc)

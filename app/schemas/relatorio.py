@@ -12,6 +12,11 @@ class CriarRelatorio(BaseModel):
     resumo: Optional[str] = None
 
 
+class GerarRelatorioRequest(BaseModel):
+    periodo_inicio: str
+    periodo_fim: str
+
+
 class RelatorioResposta(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -26,3 +31,5 @@ class RelatorioResposta(BaseModel):
     resumo: Optional[str] = None
     criado_em: str
     criado_por_id: Optional[str] = None
+    auto_generated: bool = False
+    alert_count: int = 0

@@ -173,6 +173,9 @@ async def _migrate_schema(real_engine) -> None:
         "CREATE INDEX IF NOT EXISTS idx_notifications_greenhouse_id ON notifications(greenhouse_id)",
         # tabela de preferencias de notificacao
         "CREATE TABLE IF NOT EXISTS notification_preferences (id VARCHAR PRIMARY KEY, user_id VARCHAR NOT NULL UNIQUE, channel_email BOOLEAN NOT NULL DEFAULT TRUE, channel_inapp BOOLEAN NOT NULL DEFAULT TRUE, blocked_types JSON NOT NULL DEFAULT '[]', quiet_hours_start VARCHAR, quiet_hours_end VARCHAR, quiet_hours_include_warning BOOLEAN NOT NULL DEFAULT FALSE)",
+        # colunas de geracao automatica e contagem de alertas nos relatorios
+        "ALTER TABLE relatorios ADD COLUMN IF NOT EXISTS auto_generated BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE relatorios ADD COLUMN IF NOT EXISTS alert_count INTEGER DEFAULT 0",
     ]
 
     def _run() -> None:
