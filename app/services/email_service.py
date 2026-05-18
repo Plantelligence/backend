@@ -488,3 +488,89 @@ def send_contact_confirmation_email(name: str, email: str, subject: str) -> None
     )
     msg.add_alternative(html_body, subtype="html")
     _smtp_send(msg)
+
+
+def send_notification_email(notification) -> None:
+    """
+    Envia email generico para qualquer tipo de notificacao.
+
+    Usa o titulo e mensagem da notificacao diretamente, com formatacao
+    padronizada. O assunto inclui a severidade para facilitar filtragem.
+    """
+    from app.db.postgres.session import get_session
+    from app.models.user import User
+
+    with get_session() as db:
+        user = db.query(User).filter(User.id == notification.user_id).first()
+        if not user:
+            return
+        to_email = user.email
+        user_name = user.full_name or user.email
+
+    severity_labels = {
+        "critical": "CRITICO",
+        "warning": "ATENCAO",
+        "info": "INFORMATIVO",
+    }
+    severity_label = severity_labels.get(notification.severity, "INFORMATIVO")
+    severity_colors = {
+        "critical": "#dc2626",
+        "warning": "#f59e0b",
+        "info": "#3b82f6",
+    }
+    severity_color = severity_colors.get(notification.severity, "#3b82f6")
+
+    logo_url = settings.mfa_email_logo_url
+    logo_html = (
+        f'<img src="{escape(logo_url)}" alt="Plantelligence" '
+        'style="display:block;height:34px;max-width:180px;object-fit:contain;margin:0 auto 10px;" />'
+        if logo_url
+        else '<p style="margin:0 0 10px;font:700 18px/1.2 Arial,sans-serif;letter-spacing:.08em;color:#991b1b;">PLANTELLIGENCE</p>'
+    )
+
+    html_body = (
+        "<!doctype html>"
+        "<html lang=\"pt-BR\">"
+        "<body style=\"margin:0;padding:0;background:#f3f4f6;\">"
+        "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f3f4f6;padding:24px 12px;\">"
+        "<tr><td align=\"center\">"
+        "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;\">"
+        "<tr><td style=\"padding:24px 24px 18px;text-align:center;background:linear-gradient(180deg,#fff 0%,#fff7f7 100%);\">"
+        f"{logo_html}"
+        "<p style=\"margin:0;font:600 14px/1.4 Arial,sans-serif;color:#374151;\">Notificacao automatica do sistema</p>"
+        "</td></tr>"
+        "<tr><td style=\"padding:20px 24px 8px;\">"
+        f"<div style=\"display:inline-block;background:{severity_color};color:#fff;font:700 11px/1 Arial,sans-serif;letter-spacing:.1em;padding:4px 10px;border-radius:6px;margin-bottom:12px;\">{severity_label}</div>"
+        f"<h1 style=\"margin:0 0 12px;font:700 22px/1.25 Arial,sans-serif;color:#111827;\">{escape(notification.title)}</h1>"
+        f"<p style=\"margin:0 0 16px;font:400 15px/1.7 Arial,sans-serif;color:#374151;\">{escape(notification.message)}</p>"
+        "<div style=\"border:1px solid #e5e7eb;border-radius:10px;padding:14px;background:#f9fafb;\">"
+        f"<p style=\"margin:0;font:600 12px Arial,sans-serif;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;\">Detalhes</p>"
+        f"<p style=\"margin:6px 0 0;font:400 13px Arial,sans-serif;color:#374151;\">Tipo: {escape(notification.notification_type)}</p>"
+        f"<p style=\"margin:4px 0 0;font:400 13px Arial,sans-serif;color:#374151;\">Severidade: {escape(notification.severity)}</p>"
+        "</div>"
+        "</td></tr>"
+        "<tr><td style=\"padding:16px 24px 24px;\">"
+        "<p style=\"margin:0;font:400 12px/1.6 Arial,sans-serif;color:#9ca3af;text-align:center;\">"
+        "Este e-mail foi enviado automaticamente pela plataforma Plantelligence. "
+        "Acesse o dashboard para gerenciar suas notificacoes."
+        "</p>"
+        "</td></tr>"
+        "</table>"
+        "</td></tr></table>"
+        "</body></html>"
+    )
+
+    msg = EmailMessage()
+    msg["From"] = settings.resolved_smtp_from or "Plantelligence <noreply@plantelligence.cloud>"
+    msg["To"] = to_email
+    msg["Subject"] = f"[{severity_label}] Plantelligence — {notification.title}"
+    msg.set_content(
+        f"Plantelligence — Notificacao {severity_label}\n\n"
+        f"{notification.title}\n\n"
+        f"{notification.message}\n\n"
+        f"Tipo: {notification.notification_type}\n"
+        f"Severidade: {notification.severity}\n\n"
+        "Acesse o dashboard para gerenciar suas notificacoes."
+    )
+    msg.add_alternative(html_body, subtype="html")
+    _smtp_send(msg)

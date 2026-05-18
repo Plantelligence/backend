@@ -83,6 +83,8 @@ class User(Base):
     historicos  = relationship("Historico",   back_populates="user",  cascade="all, delete-orphan")
     alertas     = relationship("Alertas",     back_populates="user",  cascade="all, delete-orphan")
     sent_commands = relationship("CommandHistory", back_populates="sent_by_user")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    notification_preferences = relationship("NotificationPreference", back_populates="user", uselist=False)
 
     def to_dict(self) -> dict:
         return {

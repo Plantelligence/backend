@@ -27,7 +27,7 @@ from fastapi.exceptions import RequestValidationError
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api.v1.routers import admin, atuadores, auth, chat, clima, crypto, dispositivos, greenhouse, preset, relatorios, site, telemetria, users
+from app.api.v1.routers import admin, atuadores, auth, chat, clima, crypto, dispositivos, greenhouse, notifications, preset, relatorios, site, telemetria, users
 from app.config.settings import settings
 from app.core.rate_limit import limiter
 from app.services import auth_service
@@ -74,6 +74,8 @@ async def _init_db() -> None:
         import app.models.preset  # noqa: F401
         import app.models.relatorio  # noqa: F401
         import app.models.command_history  # noqa: F401
+        import app.models.notification  # noqa: F401
+        import app.models.notification_preference  # noqa: F401
 
         real_engine = get_engine()
         # cria as tabelas no banco se não existirem (seguro rodar múltiplas vezes)
@@ -162,6 +164,15 @@ async def _migrate_schema(real_engine) -> None:
         "DO $$ DECLARE c TEXT; BEGIN SELECT conname INTO c FROM pg_constraint JOIN pg_class ON pg_constraint.conrelid = pg_class.oid WHERE pg_class.relname = 'relatorios' AND pg_constraint.contype = 'f' AND conname LIKE '%estufa_id%' LIMIT 1; IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE relatorios DROP CONSTRAINT ' || quote_ident(c); END IF; END $$",
         # tabela de historico de comandos enviados a atuadores
         "CREATE TABLE IF NOT EXISTS command_history (id VARCHAR PRIMARY KEY, dispositivo_id VARCHAR NOT NULL REFERENCES dispositivos(id) ON DELETE CASCADE, command_type VARCHAR NOT NULL, payload JSON, delivery_method VARCHAR NOT NULL DEFAULT 'cloud_to_device', status VARCHAR NOT NULL DEFAULT 'pending', error_message TEXT, response_payload JSON, sent_by_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL, reason TEXT)",
+        # ultima vez que o dispositivo enviou telemetria (usado para detectar desconexao)
+        "ALTER TABLE dispositivos ADD COLUMN IF NOT EXISTS last_seen_at VARCHAR",
+        # tabela de notificacoes in-app
+        "CREATE TABLE IF NOT EXISTS notifications (id VARCHAR PRIMARY KEY, user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE, notification_type VARCHAR NOT NULL, severity VARCHAR NOT NULL DEFAULT 'info', title VARCHAR NOT NULL, message TEXT NOT NULL, metadata JSON, greenhouse_id VARCHAR REFERENCES estufas(id) ON DELETE SET NULL, read BOOLEAN NOT NULL DEFAULT FALSE, read_at VARCHAR, dismissed_at VARCHAR)",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(notification_type)",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_greenhouse_id ON notifications(greenhouse_id)",
+        # tabela de preferencias de notificacao
+        "CREATE TABLE IF NOT EXISTS notification_preferences (id VARCHAR PRIMARY KEY, user_id VARCHAR NOT NULL UNIQUE, channel_email BOOLEAN NOT NULL DEFAULT TRUE, channel_inapp BOOLEAN NOT NULL DEFAULT TRUE, blocked_types JSON NOT NULL DEFAULT '[]', quiet_hours_start VARCHAR, quiet_hours_end VARCHAR, quiet_hours_include_warning BOOLEAN NOT NULL DEFAULT FALSE)",
     ]
 
     def _run() -> None:
@@ -201,6 +212,7 @@ async def startup_event():
     print(f"[startup] SMTP configurado: {smtp_ok} | usuario: {'ok' if settings.smtp_user else 'AUSENTE'} | senha: {'ok' if settings.smtp_password else 'AUSENTE'}", flush=True)
     asyncio.create_task(_init_db())
     asyncio.create_task(_start_iothub_consumer())
+    asyncio.create_task(_start_alert_detectors())
 
 
 async def _start_iothub_consumer() -> None:
@@ -215,6 +227,19 @@ async def _start_iothub_consumer() -> None:
         print("[startup] IoT Hub consumer iniciado.", flush=True)
     except Exception as exc:
         print(f"[startup] IoT Hub consumer nao iniciado (nao critico): {exc}", flush=True)
+
+
+async def _start_alert_detectors() -> None:
+    """
+    Inicia os detectores automaticos de alertas em background.
+    Monitoram metricas, dispositivos, clima, anomalias, tokens e relatorios.
+    """
+    try:
+        from app.services.alert_detectors import start_alert_detectors
+        await start_alert_detectors()
+        print("[startup] Alert detectors iniciado.", flush=True)
+    except Exception as exc:
+        print(f"[startup] Alert detectors nao iniciado (nao critico): {exc}", flush=True)
 
 
 @app.on_event("shutdown")
@@ -345,6 +370,7 @@ app.include_router(telemetria.router)    # recepção direta de leituras de sens
 app.include_router(clima.router)         # dados climáticos externos (CEP/cidade)
 app.include_router(preset.router)        # perfis de cultivo pré-configurados
 app.include_router(chat.router)          # assistente de IA para consultoria agrícola
+app.include_router(notifications.router) # notificacoes e alertas in-app + email
 app.include_router(site.router)          # rotas públicas do site institucional
 
 

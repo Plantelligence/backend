@@ -204,6 +204,47 @@ class InfluxDB:
         await self._ensure_connected()
         return await self._client.query_api().query(query=query)
 
+    async def query_sensor_averages_range(
+        self,
+        estufa_id: str,
+        start: str,
+        stop: str,
+    ) -> dict:
+        """
+        Calcula as medias dos sensores para um intervalo ISO 8601.
+
+        Diferente de query_sensor_averages (que usa YYYY-MM-DD), este metodo
+        aceita timestamps completos no formato ISO 8601 (ex.: 2025-01-15T10:30:00Z).
+
+        Usado pelos detectores automaticos para verificar metricas em janelas curtas.
+        """
+        safe_id = estufa_id.replace('"', "").replace("\\", "")
+
+        query = (
+            f'from(bucket: "{settings.influx_bucket}")\n'
+            f'  |> range(start: {start}, stop: {stop})\n'
+            f'  |> filter(fn: (r) => r._measurement == "{_MEASUREMENT}")\n'
+            f'  |> filter(fn: (r) => r.estufa_id == "{safe_id}")\n'
+            '  |> filter(fn: (r) => r._field == "temperatura" or r._field == "umidade" '
+            'or r._field == "umidade_solo" or r._field == "luminosidade")\n'
+            '  |> group(columns: ["_field"])\n'
+            '  |> mean()'
+        )
+
+        try:
+            tables = await self.query(query)
+        except Exception:
+            return {}
+
+        result: dict = {}
+        for table in tables:
+            for record in table.records:
+                field = record.get_field()
+                value = record.get_value()
+                if value is not None:
+                    result[field] = round(float(value), 2)
+        return result
+
 
 # instância global compartilhada por todo o backend
 # usada em: iothub_consumer.py, telemetria.py, relatorios.py

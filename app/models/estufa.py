@@ -49,3 +49,4 @@ class Estufa(Base):
     alertas     = relationship("Alertas",    back_populates="estufa",   cascade="all, delete-orphan")
     relatorios  = relationship("Relatorio",  back_populates="estufa",   cascade="all, delete-orphan")
     historicos  = relationship("Historico",  back_populates="estufa",   cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="greenhouse")
