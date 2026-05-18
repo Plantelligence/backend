@@ -27,7 +27,7 @@ from fastapi.exceptions import RequestValidationError
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api.v1.routers import admin, auth, chat, clima, crypto, dispositivos, greenhouse, preset, relatorios, site, telemetria, users
+from app.api.v1.routers import admin, atuadores, auth, chat, clima, crypto, dispositivos, greenhouse, preset, relatorios, site, telemetria, users
 from app.config.settings import settings
 from app.core.rate_limit import limiter
 from app.services import auth_service
@@ -73,6 +73,7 @@ async def _init_db() -> None:
         import app.models.historico  # noqa: F401
         import app.models.preset  # noqa: F401
         import app.models.relatorio  # noqa: F401
+        import app.models.command_history  # noqa: F401
 
         real_engine = get_engine()
         # cria as tabelas no banco se não existirem (seguro rodar múltiplas vezes)
@@ -159,6 +160,8 @@ async def _migrate_schema(real_engine) -> None:
         # remove FK de relatorios.estufa_id para permitir relatórios em estufas de ambas as tabelas
         # usa DO block para encontrar o constraint pelo nome dinâmico (gerado por SQLAlchemy ou pelo SQL raw)
         "DO $$ DECLARE c TEXT; BEGIN SELECT conname INTO c FROM pg_constraint JOIN pg_class ON pg_constraint.conrelid = pg_class.oid WHERE pg_class.relname = 'relatorios' AND pg_constraint.contype = 'f' AND conname LIKE '%estufa_id%' LIMIT 1; IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE relatorios DROP CONSTRAINT ' || quote_ident(c); END IF; END $$",
+        # tabela de historico de comandos enviados a atuadores
+        "CREATE TABLE IF NOT EXISTS command_history (id VARCHAR PRIMARY KEY, dispositivo_id VARCHAR NOT NULL REFERENCES dispositivos(id) ON DELETE CASCADE, command_type VARCHAR NOT NULL, payload JSON, delivery_method VARCHAR NOT NULL DEFAULT 'cloud_to_device', status VARCHAR NOT NULL DEFAULT 'pending', error_message TEXT, response_payload JSON, sent_by_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL, reason TEXT)",
     ]
 
     def _run() -> None:
@@ -336,6 +339,7 @@ app.include_router(admin.router)         # painel administrativo
 app.include_router(crypto.router)        # criptografia de dados sensíveis
 app.include_router(greenhouse.router)    # estufas (modelo novo em inglês)
 app.include_router(dispositivos.router)  # dispositivos IoT vinculados às estufas
+app.include_router(atuadores.router)     # controle remoto de atuadores via IoT Hub
 app.include_router(relatorios.router)    # relatórios periódicos de desempenho
 app.include_router(telemetria.router)    # recepção direta de leituras de sensores
 app.include_router(clima.router)         # dados climáticos externos (CEP/cidade)

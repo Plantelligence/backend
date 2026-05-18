@@ -82,6 +82,7 @@ class User(Base):
     greenhouses = relationship("Greenhouse",  back_populates="owner", cascade="all, delete-orphan")
     historicos  = relationship("Historico",   back_populates="user",  cascade="all, delete-orphan")
     alertas     = relationship("Alertas",     back_populates="user",  cascade="all, delete-orphan")
+    sent_commands = relationship("CommandHistory", back_populates="sent_by_user")
 
     def to_dict(self) -> dict:
         return {

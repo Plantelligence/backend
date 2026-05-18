@@ -41,3 +41,4 @@ class Dispositivo(Base):
     estufa    = relationship("Estufa",   back_populates="dispositivos")
     alertas   = relationship("Alertas",  back_populates="dispositivo", cascade="all, delete-orphan")
     historicos = relationship("Historico", back_populates="dispositivo", cascade="all, delete-orphan")
+    command_history = relationship("CommandHistory", back_populates="dispositivo", cascade="all, delete-orphan")
