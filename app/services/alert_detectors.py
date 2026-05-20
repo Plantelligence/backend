@@ -279,67 +279,66 @@ async def _check_devices(previous_states: dict[str, bool]) -> dict[str, bool]:
             .all()
         )
 
-    for dispositivo in dispositivos:
-        device_id = dispositivo.iothub_device_id
-        is_connected = False
-
-        try:
-            from app.services.iothub_command_service import get_command_service
-            service = get_command_service()
-            twin = await service.get_device_twin(device_id)
-            is_connected = twin.get("connectionState") == "Connected"
-
-            # atualizar last_seen_at no banco
-            dispositivo.last_seen_at = datetime.now(timezone.utc).isoformat()
-            db.commit()
-
-        except Exception:
+        for dispositivo in dispositivos:
+            device_id = dispositivo.iothub_device_id
             is_connected = False
 
-        current_states[dispositivo.id] = is_connected
+            try:
+                from app.services.iothub_command_service import get_command_service
+                service = get_command_service()
+                twin = await service.get_device_twin(device_id)
+                is_connected = twin.get("connectionState") == "Connected"
 
-        # B1 — desconectou
-        if previous_states.get(dispositivo.id) is True and not is_connected:
-            estufa = db.query(Estufa).filter(Estufa.id == dispositivo.estufa_id).first()
-            if estufa:
-                engine.dispatch(
-                    user_id=estufa.user_id,
-                    notification_type="device_disconnected",
-                    severity="warning",
-                    title=f"Dispositivo desconectado — {dispositivo.nome}",
-                    message=(
-                        f"O dispositivo '{dispositivo.nome}' da estufa "
-                        f"'{estufa.nome}' perdeu conexao com o IoT Hub."
-                    ),
-                    greenhouse_id=estufa.id,
-                    metadata={
-                        "dispositivoId": dispositivo.id,
-                        "dispositivoNome": dispositivo.nome,
-                        "dispositivoTipo": dispositivo.tipo,
-                    },
-                )
+                # atualizar last_seen_at no banco
+                dispositivo.last_seen_at = datetime.now(timezone.utc).isoformat()
+                db.commit()
 
-        # B2 — reconectou
-        elif previous_states.get(dispositivo.id) is False and is_connected:
-            estufa = db.query(Estufa).filter(Estufa.id == dispositivo.estufa_id).first()
-            if estufa:
-                engine.dispatch(
-                    user_id=estufa.user_id,
-                    notification_type="device_reconnected",
-                    severity="info",
-                    title=f"Dispositivo reconectado — {dispositivo.nome}",
-                    message=(
-                        f"O dispositivo '{dispositivo.nome}' da estufa "
-                        f"'{estufa.nome}' restabeleceu conexao com o IoT Hub."
-                    ),
-                    greenhouse_id=estufa.id,
-                    metadata={
-                        "dispositivoId": dispositivo.id,
-                        "dispositivoNome": dispositivo.nome,
-                    },
-                )
+            except Exception:
+                is_connected = False
 
-    db.close()
+            current_states[dispositivo.id] = is_connected
+
+            # B1 — desconectou
+            if previous_states.get(dispositivo.id) is True and not is_connected:
+                estufa = db.query(Estufa).filter(Estufa.id == dispositivo.estufa_id).first()
+                if estufa:
+                    engine.dispatch(
+                        user_id=estufa.user_id,
+                        notification_type="device_disconnected",
+                        severity="warning",
+                        title=f"Dispositivo desconectado — {dispositivo.nome}",
+                        message=(
+                            f"O dispositivo '{dispositivo.nome}' da estufa "
+                            f"'{estufa.nome}' perdeu conexao com o IoT Hub."
+                        ),
+                        greenhouse_id=estufa.id,
+                        metadata={
+                            "dispositivoId": dispositivo.id,
+                            "dispositivoNome": dispositivo.nome,
+                            "dispositivoTipo": dispositivo.tipo,
+                        },
+                    )
+
+            # B2 — reconectou
+            elif previous_states.get(dispositivo.id) is False and is_connected:
+                estufa = db.query(Estufa).filter(Estufa.id == dispositivo.estufa_id).first()
+                if estufa:
+                    engine.dispatch(
+                        user_id=estufa.user_id,
+                        notification_type="device_reconnected",
+                        severity="info",
+                        title=f"Dispositivo reconectado — {dispositivo.nome}",
+                        message=(
+                            f"O dispositivo '{dispositivo.nome}' da estufa "
+                            f"'{estufa.nome}' restabeleceu conexao com o IoT Hub."
+                        ),
+                        greenhouse_id=estufa.id,
+                        metadata={
+                            "dispositivoId": dispositivo.id,
+                            "dispositivoNome": dispositivo.nome,
+                        },
+                    )
+
     return current_states
 
 

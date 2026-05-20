@@ -28,6 +28,7 @@ O ESP32 deve estar configurado para:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -86,8 +87,13 @@ class IoTCommandService:
         message.custom_properties["command_type"] = payload.get("command", "custom")
         message.custom_properties["sent_at"] = datetime.now(timezone.utc).isoformat()
 
-        registry_manager = IoTHubRegistryManager(self._connection_string)
-        sent_message = registry_manager.send_c2d_message(device_id, message)
+        # Executa em thread separada para nao bloquear o event loop do FastAPI.
+        # IoTHubRegistryManager e uma biblioteca sincrona que faz chamadas HTTP bloqueantes.
+        def _sync_send() -> Any:
+            rm = IoTHubRegistryManager(self._connection_string)
+            return rm.send_c2d_message(device_id, message)
+
+        sent_message = await asyncio.to_thread(_sync_send)
 
         logger.info(
             "c2d_message_sent device_id=%s message_id=%s command=%s",
@@ -141,8 +147,12 @@ class IoTCommandService:
             connect_timeout_in_seconds=5,
         )
 
-        registry_manager = IoTHubRegistryManager(self._connection_string)
-        result = registry_manager.invoke_device_method(device_id, c2d_method)
+        # Direct Method pode levar ate `timeout_seconds` para responder — nunca bloquear o loop.
+        def _sync_invoke() -> Any:
+            rm = IoTHubRegistryManager(self._connection_string)
+            return rm.invoke_device_method(device_id, c2d_method)
+
+        result = await asyncio.to_thread(_sync_invoke)
 
         # parse da resposta do dispositivo
         response_payload = {}
@@ -184,8 +194,11 @@ class IoTCommandService:
         except ImportError:
             raise RuntimeError("azure-iot-hub nao esta instalado.")
 
-        registry_manager = IoTHubRegistryManager(self._connection_string)
-        twin = registry_manager.get_twin(device_id)
+        def _sync_get_twin() -> Any:
+            rm = IoTHubRegistryManager(self._connection_string)
+            return rm.get_twin(device_id)
+
+        twin = await asyncio.to_thread(_sync_get_twin)
 
         return {
             "deviceId": twin.device_id,
@@ -218,15 +231,20 @@ class IoTCommandService:
         except ImportError:
             raise RuntimeError("azure-iot-hub nao esta instalado.")
 
-        registry_manager = IoTHubRegistryManager(self._connection_string)
-        twin = registry_manager.get_twin(device_id)
+        # get_twin + update_twin sao sincronos — executar em thread para nao bloquear o loop.
+        # Os dois precisam do mesmo registry_manager para garantir consistencia do etag.
+        def _sync_update_twin() -> Any:
+            rm = IoTHubRegistryManager(self._connection_string)
+            twin = rm.get_twin(device_id)
 
-        # mescla com desired properties existentes (patch parcial)
-        existing = twin.properties.desired if twin.properties else {}
-        merged = _deep_merge(existing, desired)
+            # mescla com desired properties existentes (patch parcial)
+            existing = twin.properties.desired if twin.properties else {}
+            merged = _deep_merge(existing, desired)
 
-        patch = {"properties": {"desired": merged}}
-        updated_twin = registry_manager.update_twin(device_id, patch, twin.etag)
+            patch = {"properties": {"desired": merged}}
+            return rm.update_twin(device_id, patch, twin.etag)
+
+        updated_twin = await asyncio.to_thread(_sync_update_twin)
 
         logger.info(
             "twin_updated device_id=%s desired_keys=%s",
